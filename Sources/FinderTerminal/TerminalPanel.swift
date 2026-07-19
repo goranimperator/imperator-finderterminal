@@ -123,12 +123,9 @@ final class TerminalPanel: NSPanel {
         }
     }
 
-    /// What real darkAqua window chrome actually paints: #282828 — measured by
-    /// rendering an NSWindow themeFrame offscreen and sampling it. Appearance-based
-    /// resolution of `windowBackgroundColor` yields the base variant (#1E1E1E),
-    /// which visibly does NOT match Finder's padding area.
+    /// Goran-specified exact chrome shade: #1D1D21.
     private func chromeColor() -> CGColor {
-        CGColor(srgbRed: 0.157, green: 0.157, blue: 0.157, alpha: 1)
+        CGColor(srgbRed: 0x1D / 255.0, green: 0x1D / 255.0, blue: 0x21 / 255.0, alpha: 1)
     }
 
     /// Match the current theme: plate gets the theme background (opaque — it sits
