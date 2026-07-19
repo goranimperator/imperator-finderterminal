@@ -46,9 +46,12 @@ final class TerminalPanel: NSPanel {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 600, height: Self.defaultHeight),
                    styleMask: [.borderless],
                    backing: .buffered, defer: false)
-        isFloatingPanel = true
-        level = .floating
-        hidesOnDeactivate = false           // visibility is driven by app-activation logic
+        // Normal level: the panel lives in the regular window stack, slotted just
+        // above its Finder window via order(_:relativeTo:) — so anything covering
+        // that window covers the terminal too. It must NOT float over other apps.
+        isFloatingPanel = false
+        level = .normal
+        hidesOnDeactivate = false
         collectionBehavior = [.fullScreenAuxiliary]
         hasShadow = true
         backgroundColor = .clear

@@ -49,8 +49,8 @@ final class WindowTracker {
         return currentFrame()
     }
 
-    /// Cocoa (bottom-left origin, global) frame of the tracked window.
-    func currentFrame() -> CGRect? {
+    /// Raw AX frame: top-left origin, same coordinate space as CGWindowList.
+    private func rawFrame() -> CGRect? {
         guard let w = window else { return nil }
         var posRef: CFTypeRef?
         var sizeRef: CFTypeRef?
@@ -61,7 +61,33 @@ final class WindowTracker {
         var s = CGSize.zero
         AXValueGetValue(posRef as! AXValue, .cgPoint, &p)
         AXValueGetValue(sizeRef as! AXValue, .cgSize, &s)
-        return Self.axToCocoa(CGRect(origin: p, size: s))
+        return CGRect(origin: p, size: s)
+    }
+
+    /// Cocoa (bottom-left origin, global) frame of the tracked window.
+    func currentFrame() -> CGRect? {
+        rawFrame().map(Self.axToCocoa)
+    }
+
+    /// CGWindowID of the tracked window, resolved by matching the AX frame
+    /// against Finder's on-screen windows. Used to slot the terminal panel
+    /// directly above its Finder window in the global z-order.
+    func windowNumber() -> CGWindowID? {
+        guard let pid = Self.finderPID(), let raw = rawFrame(),
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+                as? [[String: Any]] else { return nil }
+        for info in list {
+            guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let b = info[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = b["X"], let y = b["Y"], let w = b["Width"], let h = b["Height"]
+            else { continue }
+            if abs(x - raw.minX) < 2, abs(y - raw.minY) < 2,
+               abs(w - raw.width) < 2, abs(h - raw.height) < 2 {
+                return info[kCGWindowNumber as String] as? CGWindowID
+            }
+        }
+        return nil
     }
 
     /// Grow (positive delta) or shrink (negative) the tracked window along the given

@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.dragBase = nil
             }
             self.redock()
+            self.reassertOrder()                     // dragging raises the Finder window
         }
         tracker.onFolderChange = { [weak self] in
             guard let self, self.terminalOpen, let path = FinderBridge.frontmostFolder() else { return }
@@ -119,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.dragBase = nil
             self.redock()                            // settle on AX ground truth
+            self.reassertOrder()                     // clicks can reshuffle window order
         } { mouseMonitors.append(m) }
 
         hotkey = Hotkey { [weak self] in self?.toggleTerminal() }
@@ -246,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             terminalHeight = freed - TerminalPanel.gap
             redockOrShow(show: true)
             tracker.startObserving()
+            reassertOrder()
             return true
         }
         if freed > 0 { tracker.adjust(side: side, by: freed) }   // undo partial shrink
@@ -317,13 +320,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func frontAppChanged(_ note: Notification) {
         guard terminalOpen else { return }
-        let bid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
-        if bid == "com.apple.finder" || bid == Bundle.main.bundleIdentifier {
-            panel.orderFrontRegardless()
-            redock()
-        } else {
-            panel.orderOut(nil)
-        }
+        redock()
+        reassertOrder()
+    }
+
+    /// Slot the panel directly above its Finder window in the global z-order,
+    /// so whatever covers that window covers the terminal too. Cheap; called on
+    /// window/app events rather than per frame.
+    private func reassertOrder() {
+        guard terminalOpen, shrunkBy > 0, panel.isVisible,
+              let num = tracker.windowNumber() else { return }
+        panel.order(.above, relativeTo: Int(num))
     }
 
     private func promptAccessibility() {
