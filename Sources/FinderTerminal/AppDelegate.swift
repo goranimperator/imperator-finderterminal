@@ -21,8 +21,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminalHeight: CGFloat = 0
     /// Docking side frozen at open time (settings may change while open).
     private var side: DockSide = .bottom
-    private var followTimer: Timer?
-    private var followUntil = Date.distantPast
+    /// Per-frame follower: polls the Finder frame on every display refresh while
+    /// the panel is visible, so dragging never lags behind by more than a frame.
+    private var displayLink: CADisplayLink?
+    private var lastBodyRect = CGRect.zero
+    /// Mouse-riding drag prediction: while the Finder window is being moved, its
+    /// motion is the mouse's motion. Anchoring the last AX-known frame to the mouse
+    /// lets the panel move in the same event stream as the drag — zero perceived
+    /// lag — while AX notifications keep re-anchoring the base (handles edge snap).
+    private var dragBase: (finder: CGRect, mouse: CGPoint)?
+    private var mouseMonitors: [Any] = []
     private var devRemote: DevRemote?
     private var settingsWindow: NSWindow?
     private var lastSettingsFingerprint = ""
@@ -38,8 +46,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         promptAccessibility()
 
         tracker.onGeometryChange = { [weak self] in
-            self?.redock()
-            self?.kickFastFollow()
+            guard let self else { return }
+            // Re-anchor the drag prediction on every AX ground truth. A size change
+            // means the window is being resized, not moved — mouse prediction would
+            // move the panel the wrong way, so hand over to display-link polling.
+            if NSEvent.pressedMouseButtons & 1 != 0, let f = self.tracker.currentFrame() {
+                if let base = self.dragBase, base.finder.size != f.size {
+                    self.dragBase = nil
+                } else {
+                    self.dragBase = (f, NSEvent.mouseLocation)
+                }
+            } else {
+                self.dragBase = nil
+            }
+            self.redock()
         }
         tracker.onFolderChange = { [weak self] in
             guard let self, self.terminalOpen, let path = FinderBridge.frontmostFolder() else { return }
@@ -49,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.terminalOpen else { return }
             self.terminalOpen = false
             self.shrunkBy = 0                        // window is gone; nothing to restore
+            self.stopFollowing()
             self.panel.hide()
             self.tracker.stopObserving()
         }
@@ -89,12 +110,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(frontAppChanged(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
 
+        // Mouse-riding drag follow: move the panel inside the drag's own event
+        // stream instead of waiting for AX to report the window position.
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
+            self?.predictDragPosition()
+        } { mouseMonitors.append(m) }
+        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
+            guard let self else { return }
+            self.dragBase = nil
+            self.redock()                            // settle on AX ground truth
+        } { mouseMonitors.append(m) }
+
         hotkey = Hotkey { [weak self] in self?.toggleTerminal() }
 
         devRemote = DevRemote(
             onToggle: { [weak self] in self?.toggleTerminal() },
             onSnapshot: { [weak self] path in self?.devSnapshot(to: path) }
         )
+
+        // Pre-spawn the shell so the first toggle shows a ready prompt instead of
+        // paying zsh login/rc startup time. The first open cd:s it to the right folder.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.session.startIfNeeded(dir: NSHomeDirectory())
+        }
     }
 
     /// Write the panel's rendered content + geometry state for headless verification.
@@ -216,6 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeTerminal() {
         terminalOpen = false
+        stopFollowing()
         panel.hide()
         tracker.stopObserving()
         if shrunkBy > 0 {
@@ -231,23 +270,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func redockOrShow(show: Bool) {
         guard terminalOpen || show, shrunkBy > 0, let f = tracker.currentFrame() else { return }
         let rect = bodyRect(finder: f)
-        if show { panel.show(at: rect) } else { panel.reDock(at: rect) }
+        guard rect != lastBodyRect || show else { return }   // skip no-op frame updates
+        lastBodyRect = rect
+        if show {
+            panel.show(at: rect)
+            startFollowing()
+        } else {
+            panel.reDock(at: rect)
+        }
     }
 
-    /// AX move/resize notifications arrive in coarse bursts while dragging; poll at
-    /// 60 Hz for a short window after each burst so the strip tracks smoothly.
-    private func kickFastFollow() {
-        followUntil = Date().addingTimeInterval(0.4)
-        guard followTimer == nil else { return }
-        followTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            if Date() > self.followUntil {
-                self.followTimer?.invalidate()
-                self.followTimer = nil
-                return
-            }
-            self.redock()
-        }
+    /// AX move/resize notifications arrive in coarse bursts while dragging, which
+    /// makes notification-driven docking lag. Instead, poll the Finder frame on
+    /// every display refresh while the panel is visible — reDock is skipped when
+    /// nothing moved, so the steady-state cost is one AX read per frame.
+    private func startFollowing() {
+        guard displayLink == nil, let view = panel.contentView else { return }
+        let link = view.displayLink(target: self, selector: #selector(followTick))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopFollowing() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func followTick() {
+        // While mouse prediction is active it owns the panel position; AX polling
+        // here would push stale frames and fight the fresher mouse data.
+        guard terminalOpen, panel.isShown, dragBase == nil else { return }
+        redock()
+    }
+
+    /// Place the panel from the live mouse position during a window drag.
+    private func predictDragPosition() {
+        guard terminalOpen, shrunkBy > 0, let base = dragBase else { return }
+        let mouse = NSEvent.mouseLocation
+        let predicted = base.finder.offsetBy(dx: mouse.x - base.mouse.x,
+                                             dy: mouse.y - base.mouse.y)
+        let rect = bodyRect(finder: predicted)
+        guard rect != lastBodyRect else { return }
+        lastBodyRect = rect
+        panel.reDock(at: rect)
     }
 
     @objc private func frontAppChanged(_ note: Notification) {

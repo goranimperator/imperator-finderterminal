@@ -18,12 +18,14 @@ real Finder: a background overlay anchored to the frontmost Finder window.
 - **Background menu-bar app** (`LSUIElement`, no Dock icon). One dependency: [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
 - **Global hotkey `⌘⌥§`** (ISO section key, top-left on Swedish keyboards) toggles the panel.
 - On open it reads the frontmost Finder folder (Apple events), **shrinks the Finder window**
-  (Accessibility, height only — top edge stays) and places the terminal strip in the freed gap
-  below, so it reads as a section of the window and never covers Finder content. The strip follows
-  window moves/resizes (60 Hz), hides whenever neither Finder nor the terminal is frontmost, and
-  the window height is restored on close. No Finder window → drops from the top of the screen, `cd ~`.
-- **Theme** is pulled from your **Terminal.app default profile** (background, text, cursor, selection,
-  16 ANSI colors, font).
+  (Accessibility) and attaches a terminal window in the freed space (8pt gap, splitter pill in the
+  gap resizes both at once, outer edge resizes like a normal window). Dock side is selectable:
+  top/right/bottom/left. The panel follows window moves/resizes via a display-link (per-frame,
+  no lag), hides whenever neither Finder nor the terminal is frontmost, and the Finder size is
+  restored on close. No Finder window → a new one is opened and docked to automatically.
+- **Theme** follows your **Terminal.app default profile** by default (background, text, cursor,
+  selection, 16 ANSI colors, font, line spacing) — or pick one of ten classic Terminal.app presets
+  or fully custom colors + font size in Settings (menu bar icon ▸ gear).
 - **Two-way sync**: navigating in Finder `cd`s the shell; `cd` in the shell moves Finder. This works
   because the shell is spawned with `TERM_PROGRAM=Apple_Terminal`, so the system `/etc/zshrc` emits
   OSC 7 on every prompt, which SwiftTerm reports back. A single shared "current directory" value
@@ -68,10 +70,10 @@ Then: open a Finder window, press **⌘⌥§**.
 
 Rebuilt the app? Quit the running one first (menu-bar icon ▸ Quit), then relaunch.
 
-## Not in v1 (see plan)
+## Not yet built
 
-Rebindable hotkey + preferences UI, live theme reload, an optional `FIFinderSync` toolbar button /
-"Open terminal here" contextual item, multi-window / per-window sessions, panel size memory.
+Rebindable hotkey, an optional `FIFinderSync` toolbar button / "Open terminal here" contextual
+item, multi-window / per-window sessions, panel size memory.
 
 ## Known limits
 

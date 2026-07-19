@@ -57,7 +57,7 @@ final class TerminalPanel: NSPanel {
         // Window body: exact system window background (same as Finder), rounded,
         // with the standard macOS hairline edge. Sits beside the transparent gap strip.
         container.wantsLayer = true
-        container.layer?.backgroundColor = Self.chromeColor()
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor  // refined in applyTheme
         container.layer?.cornerRadius = Self.windowRadius
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = true
@@ -120,18 +120,18 @@ final class TerminalPanel: NSPanel {
         }
     }
 
-    /// Finder's content-area shade: `windowBackgroundColor` (base variant) under
-    /// darkAqua = #1E1E1E. Resolving the dynamic color inside a floating panel
-    /// yields the *elevated* dark variant (#282828), which does NOT match Finder —
-    /// so the base value is pinned here. Verified against a Finder screenshot.
-    private static func chromeColor() -> CGColor {
-        CGColor(srgbRed: 0.118, green: 0.118, blue: 0.118, alpha: 1)
+    /// What real darkAqua window chrome actually paints: #282828 — measured by
+    /// rendering an NSWindow themeFrame offscreen and sampling it. Appearance-based
+    /// resolution of `windowBackgroundColor` yields the base variant (#1E1E1E),
+    /// which visibly does NOT match Finder's padding area.
+    private func chromeColor() -> CGColor {
+        CGColor(srgbRed: 0.157, green: 0.157, blue: 0.157, alpha: 1)
     }
 
     /// Match the current theme: plate gets the theme background (opaque — it sits
     /// on solid window chrome), chrome tracks the Finder color.
     func applyTheme(_ theme: TerminalTheme) {
-        container.layer?.backgroundColor = Self.chromeColor()
+        container.layer?.backgroundColor = chromeColor()
         terminalBox.layer?.backgroundColor =
             (theme.background ?? .black).withAlphaComponent(1).cgColor
     }

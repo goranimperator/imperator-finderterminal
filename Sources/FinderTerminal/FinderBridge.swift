@@ -4,19 +4,24 @@ import AppKit
 /// navigate the frontmost window to a path. Requires Automation permission
 /// (granted on first use; NSAppleEventsUsageDescription must be in Info.plist).
 enum FinderBridge {
+    /// Compiled once; this script runs on every open and every folder change.
+    private static let frontmostFolderScript = NSAppleScript(source: """
+    tell application "Finder"
+        if (count of Finder windows) is 0 then return ""
+        try
+            return POSIX path of (target of front Finder window as alias)
+        on error
+            return ""
+        end try
+    end tell
+    """)
+
     /// POSIX path of the folder shown in the frontmost Finder window, or nil.
     static func frontmostFolder() -> String? {
-        let src = """
-        tell application "Finder"
-            if (count of Finder windows) is 0 then return ""
-            try
-                return POSIX path of (target of front Finder window as alias)
-            on error
-                return ""
-            end try
-        end tell
-        """
-        guard let out = run(src), !out.isEmpty else { return nil }
+        assert(Thread.isMainThread)
+        var err: NSDictionary?
+        guard let out = frontmostFolderScript?.executeAndReturnError(&err).stringValue,
+              !out.isEmpty else { return nil }
         return out
     }
 
