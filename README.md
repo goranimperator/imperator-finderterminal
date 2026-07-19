@@ -1,93 +1,81 @@
 # Imperator FinderTerminal
 
+A keyboard-triggered terminal that docks over the frontmost **real** Finder window
+(quake-style), the way [sheru.app](https://sheru.app) does `⌘J` — but without replacing Finder.
+Finder stays 100% untouched: all native views (icon, list, **column**, **gallery**) keep working,
+because the app never modifies Finder. It just overlays a themed terminal on top and keeps the two
+in sync.
 
+## Why not a real Finder extension?
 
-## Getting started
+macOS exposes **no API to embed a view inside a Finder window**. A Finder extension (`FIFinderSync`)
+can only add a toolbar button, a right-click menu, sidebar icons, and file badges — never a panel or
+terminal. So the terminal cannot live *inside* Finder. This app is the closest thing that keeps the
+real Finder: a background overlay anchored to the frontmost Finder window.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## How it works
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **Background menu-bar app** (`LSUIElement`, no Dock icon). One dependency: [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
+- **Global hotkey `⌃\`** (Control-backtick) toggles the panel. (Not `⌘J` — that is Finder's own
+  "Show View Options"; a global hotkey would swallow it.)
+- On open it reads the frontmost Finder folder (Apple events) and docks a SwiftTerm zsh over that
+  window (Accessibility gives the window frame + move/resize tracking). No Finder window → drops from
+  the top of the screen, `cd ~`.
+- **Theme** is pulled from your **Terminal.app default profile** (background, text, cursor, selection,
+  16 ANSI colors, font).
+- **Two-way sync**: navigating in Finder `cd`s the shell; `cd` in the shell moves Finder. This works
+  because the shell is spawned with `TERM_PROGRAM=Apple_Terminal`, so the system `/etc/zshrc` emits
+  OSC 7 on every prompt, which SwiftTerm reports back. A single shared "current directory" value
+  breaks the feedback loop.
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## Build
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/goranimperator/imperator-finderterminal.git
-git branch -M main
-git push -uf origin main
+./build.sh          # debug build -> "build/Imperator FinderTerminal.app", codesigned "Imperator Dev"
+./build.sh release  # optimized
 ```
 
-## Integrate with your tools
+Requires the Swift toolchain (Command Line Tools is enough; full Xcode not required to build).
+Override the signing identity with `CODESIGN_IDENTITY=... ./build.sh`.
 
-* [Set up project integrations](https://gitlab.com/goranimperator/imperator-finderterminal/-/settings/integrations)
+## First run
 
-## Collaborate with your team
+```
+open "build/Imperator FinderTerminal.app"
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Grant two permissions (the app degrades gracefully until you do):
 
-## Test and Deploy
+1. **Accessibility** — System Settings ▸ Privacy & Security ▸ Accessibility ▸ enable *Imperator FinderTerminal*.
+   Needed to dock onto and follow the Finder window. Without it you get the top-of-screen quake
+   fallback.
+2. **Automation ▸ Finder** — prompted the first time you press the hotkey. Needed to read/drive the
+   Finder folder.
 
-Use the built-in continuous integration in GitLab.
+Then: open a Finder window, press **⌃\`**.
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Test checklist
 
-***
+1. Finder in **column view**, open a folder, press ⌃\` → terminal docks over the window, `pwd`
+   matches the folder. Switch Finder to **gallery view** → still fine (Finder is untouched).
+2. Set Terminal.app's default profile to a dark one (e.g. "Pro"), relaunch the app, open the panel →
+   colors + font match.
+3. In the panel run `cd ~/Downloads` → Finder navigates there. Click a different folder in Finder →
+   the prompt `cd`s there. No flicker/loop.
+4. Toggle ⌃\` a few times → same session persists, repositions to the current Finder window.
+5. Move/resize the Finder window while the panel is open → the panel follows.
 
-# Editing this README
+Rebuilt the app? Quit the running one first (menu-bar icon ▸ Quit), then relaunch.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## Not in v1 (see plan)
 
-## Suggestions for a good README
+Rebindable hotkey + preferences UI, live theme reload, an optional `FIFinderSync` toolbar button /
+"Open terminal here" contextual item, multi-window / per-window sessions, panel size memory.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Known limits
 
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+- **Multi-monitor**: the AX→Cocoa coordinate flip uses the menu-bar screen height; docking may be off
+  on secondary displays. Single-display is exact.
+- **Non-zsh shells**: OSC 7 (terminal→Finder) relies on the system zsh wiring; bash/fish won't emit
+  it, so only Finder→terminal will sync there. Finder→terminal always works.
+- Non-sandboxed dev build (needs PTY spawn + Apple events + Accessibility); not for the App Store.
