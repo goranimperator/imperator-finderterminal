@@ -4,12 +4,14 @@ import SwiftTerm
 /// Colors + font pulled from the user's Terminal.app default profile so the
 /// embedded terminal matches the system Terminal look.
 struct TerminalTheme {
-    var background: NSColor?
+    var background: NSColor?      // keeps the profile's alpha (translucent backgrounds)
+    var blur: CGFloat             // profile "BackgroundBlur", 0...1
     var foreground: NSColor?
     var cursor: NSColor?
     var selection: NSColor?
     var ansi: [SwiftTerm.Color]   // exactly 16
     var font: NSFont
+    var lineHeight: CGFloat       // profile "FontHeightSpacing" multiplier, 1.0 = default
 
     /// xterm basic 16-color palette, used per-slot when a profile color is missing.
     private static let fallback16: [(UInt16, UInt16, UInt16)] = [
@@ -25,6 +27,48 @@ struct TerminalTheme {
         "ANSIBrightBlackColor", "ANSIBrightRedColor", "ANSIBrightGreenColor", "ANSIBrightYellowColor",
         "ANSIBrightBlueColor", "ANSIBrightMagentaColor", "ANSIBrightCyanColor", "ANSIBrightWhiteColor",
     ]
+
+    /// The ten classic Terminal.app profile palettes: (background, text, cursor, selection).
+    private static let presets: [ThemeChoice: (String, String, String, String)] = [
+        .basic: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF"),
+        .grass: ("#13773D", "#FFF0A5", "#8C2800", "#B64926"),
+        .homebrew: ("#000000", "#28FE14", "#38FF12", "#083905"),
+        .manPage: ("#FEF49C", "#000000", "#7F7F7F", "#A5CDFF"),
+        .novel: ("#DFDBC3", "#3B2322", "#73635A", "#A4A390"),
+        .ocean: ("#224FBC", "#FFFFFF", "#7F7F7F", "#216DFF"),
+        .pro: ("#000000", "#F2F2F2", "#4D4D4D", "#414141"),
+        .redSands: ("#7A251E", "#D7C9A7", "#FFFFFF", "#A4A390"),
+        .silverAerogel: ("#929292", "#000000", "#939393", "#C1DDFF"),
+        .solidColors: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF"),
+    ]
+
+    /// Theme for the current AppSettings selection. Presets and custom reuse the
+    /// Terminal.app profile's font and ANSI palette; only the core colors change.
+    static func current() -> TerminalTheme {
+        var t = fromTerminalApp()
+        switch AppSettings.theme {
+        case .profile:
+            break
+        case .custom:
+            t.background = AppSettings.customBackground
+            t.foreground = AppSettings.customText
+            t.cursor = AppSettings.customCursor
+            t.selection = AppSettings.customSelection
+            t.blur = 0
+        case let choice:
+            if let (bg, fg, cur, sel) = presets[choice] {
+                t.background = NSColor(hex: bg)
+                t.foreground = NSColor(hex: fg)
+                t.cursor = NSColor(hex: cur)
+                t.selection = NSColor(hex: sel)
+                t.blur = 0
+            }
+        }
+        if AppSettings.fontSize > 0 {
+            t.font = NSFont(descriptor: t.font.fontDescriptor, size: AppSettings.fontSize) ?? t.font
+        }
+        return t
+    }
 
     static func fromTerminalApp() -> TerminalTheme {
         let d = UserDefaults(suiteName: "com.apple.Terminal")
@@ -59,11 +103,13 @@ struct TerminalTheme {
 
         return TerminalTheme(
             background: color("BackgroundColor"),
+            blur: CGFloat(profile?["BackgroundBlur"] as? Double ?? 0),
             foreground: color("TextColor"),
             cursor: color("CursorColor"),
             selection: color("SelectionColor"),
             ansi: ansi,
-            font: font
+            font: font,
+            lineHeight: CGFloat(profile?["FontHeightSpacing"] as? Double ?? 1.0)
         )
     }
 }

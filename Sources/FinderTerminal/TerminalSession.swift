@@ -25,14 +25,20 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         applyTheme()
     }
 
-    func applyTheme() {
-        let t = TerminalTheme.fromTerminalApp()
-        if let bg = t.background { view.nativeBackgroundColor = bg }
+    @discardableResult
+    func applyTheme() -> TerminalTheme {
+        let t = TerminalTheme.current()
+        // Opaque profile background: the panel's terminal plate paints the same
+        // color behind the inset text area, so plate padding and text area read
+        // as one seamless surface.
+        view.nativeBackgroundColor = (t.background ?? .black).withAlphaComponent(1)
         if let fg = t.foreground { view.nativeForegroundColor = fg }
         if let cur = t.cursor { view.caretColor = cur }
         if let sel = t.selection { view.selectedTextBackgroundColor = sel }
         if t.ansi.count == 16 { view.installColors(t.ansi) }
         view.font = t.font
+        if view.lineSpacing != t.lineHeight { view.lineSpacing = t.lineHeight }
+        return t
     }
 
     func startIfNeeded(dir: String) {

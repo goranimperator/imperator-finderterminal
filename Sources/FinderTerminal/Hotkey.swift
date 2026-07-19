@@ -8,9 +8,9 @@ final class Hotkey {
     private var handlerRef: EventHandlerRef?
     private let onFire: () -> Void
 
-    /// Default: Control-` (grave). keyCode 50 = kVK_ANSI_Grave, modifier controlKey.
-    init(keyCode: UInt32 = UInt32(kVK_ANSI_Grave),
-         modifiers: UInt32 = UInt32(controlKey),
+    /// Default: Command-Option-§ (ISO section key, top-left on Swedish keyboards).
+    init(keyCode: UInt32 = UInt32(kVK_ISO_Section),
+         modifiers: UInt32 = UInt32(cmdKey | optionKey),
          onFire: @escaping () -> Void) {
         self.onFire = onFire
 

@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>Imperator FinderTerminal</string>
     <key>CFBundleIdentifier</key>
-    <string>com.imperator.finderterminal</string>
+    <string>com.goranimperator.ImperatorFinderTerminal</string>
     <key>CFBundleExecutable</key>
     <string>FinderTerminal</string>
     <key>CFBundleIconFile</key>
@@ -19,11 +19,13 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>13.0</string>
+    <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright (c) 1986 Goran Imperator. All rights reserved.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Imperator FinderTerminal reads and changes the folder shown in the frontmost Finder window so the terminal and Finder stay in sync.</string>
 </dict>

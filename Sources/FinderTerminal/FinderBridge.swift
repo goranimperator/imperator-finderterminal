@@ -20,6 +20,26 @@ enum FinderBridge {
         return out
     }
 
+    /// Open a fresh Finder window on the home folder, sized generously (Finder's
+    /// default window is too small to shrink for docking) and bring Finder forward.
+    static func openNewWindow() {
+        let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let fullHeight = NSScreen.main?.frame.height ?? screen.maxY
+        let w = (screen.width * 0.5).rounded()
+        let h = (screen.height * 0.75).rounded()
+        let x = (screen.minX + (screen.width - w) / 2).rounded()
+        let cocoaY = (screen.minY + (screen.height - h) / 2).rounded()
+        let top = (fullHeight - (cocoaY + h)).rounded()   // AppleScript bounds are top-left based
+        let src = """
+        tell application "Finder"
+            activate
+            set w to make new Finder window to (path to home folder)
+            set bounds of w to {\(Int(x)), \(Int(top)), \(Int(x + w)), \(Int(top + h))}
+        end tell
+        """
+        _ = run(src)
+    }
+
     /// Point the frontmost Finder window at `path` (opens a new window if none).
     static func navigate(to path: String) {
         let p = PathUtil.appleScriptQuote(path)

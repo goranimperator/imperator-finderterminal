@@ -16,11 +16,12 @@ real Finder: a background overlay anchored to the frontmost Finder window.
 ## How it works
 
 - **Background menu-bar app** (`LSUIElement`, no Dock icon). One dependency: [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm).
-- **Global hotkey `⌃\`** (Control-backtick) toggles the panel. (Not `⌘J` — that is Finder's own
-  "Show View Options"; a global hotkey would swallow it.)
-- On open it reads the frontmost Finder folder (Apple events) and docks a SwiftTerm zsh over that
-  window (Accessibility gives the window frame + move/resize tracking). No Finder window → drops from
-  the top of the screen, `cd ~`.
+- **Global hotkey `⌘⌥§`** (ISO section key, top-left on Swedish keyboards) toggles the panel.
+- On open it reads the frontmost Finder folder (Apple events), **shrinks the Finder window**
+  (Accessibility, height only — top edge stays) and places the terminal strip in the freed gap
+  below, so it reads as a section of the window and never covers Finder content. The strip follows
+  window moves/resizes (60 Hz), hides whenever neither Finder nor the terminal is frontmost, and
+  the window height is restored on close. No Finder window → drops from the top of the screen, `cd ~`.
 - **Theme** is pulled from your **Terminal.app default profile** (background, text, cursor, selection,
   16 ANSI colors, font).
 - **Two-way sync**: navigating in Finder `cd`s the shell; `cd` in the shell moves Finder. This works
@@ -52,17 +53,17 @@ Grant two permissions (the app degrades gracefully until you do):
 2. **Automation ▸ Finder** — prompted the first time you press the hotkey. Needed to read/drive the
    Finder folder.
 
-Then: open a Finder window, press **⌃\`**.
+Then: open a Finder window, press **⌘⌥§**.
 
 ## Test checklist
 
-1. Finder in **column view**, open a folder, press ⌃\` → terminal docks over the window, `pwd`
+1. Finder in **column view**, open a folder, press ⌘⌥§ → terminal docks over the window, `pwd`
    matches the folder. Switch Finder to **gallery view** → still fine (Finder is untouched).
 2. Set Terminal.app's default profile to a dark one (e.g. "Pro"), relaunch the app, open the panel →
    colors + font match.
 3. In the panel run `cd ~/Downloads` → Finder navigates there. Click a different folder in Finder →
    the prompt `cd`s there. No flicker/loop.
-4. Toggle ⌃\` a few times → same session persists, repositions to the current Finder window.
+4. Toggle ⌘⌥§ a few times → same session persists, repositions to the current Finder window.
 5. Move/resize the Finder window while the panel is open → the panel follows.
 
 Rebuilt the app? Quit the running one first (menu-bar icon ▸ Quit), then relaunch.
