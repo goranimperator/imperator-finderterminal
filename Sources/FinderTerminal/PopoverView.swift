@@ -78,7 +78,14 @@ struct LaunchAtLoginToggle: View {
 
 // MARK: - Brandbook 18.3: Popover content
 
+/// Runtime state shared from AppDelegate so the popover's switch reflects
+/// whether the terminal is currently open.
+final class TerminalState: ObservableObject {
+    @Published var isOpen = false
+}
+
 struct PopoverContentView: View {
+    @ObservedObject var state: TerminalState
     let onToggleTerminal: () -> Void
     let onShowAbout: () -> Void
     let onShowSettings: () -> Void
@@ -87,8 +94,12 @@ struct PopoverContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // HEADER -- app name only, no icon/sigil
-            HStack {
+            // HEADER -- menu bar icon + name (Goran's spec; overrides brandbook 9.1)
+            HStack(spacing: 8) {
+                Image(systemName: "apple.terminal")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)   // same as Free Games' header sigil
                 Text("Imperator FinderTerminal")
                     .font(.headline)
                 Spacer()
@@ -100,27 +111,35 @@ struct PopoverContentView: View {
 
             // CONTENT
             VStack(alignment: .leading, spacing: 16) {
-                HoverButton(action: onToggleTerminal) {
-                    HStack {
-                        Image(systemName: "apple.terminal")
-                        Text("Toggle FinderTerminal")
-                            .font(.system(size: 13))
-                        Spacer()
-                        Text("⌘⌥§")
-                            .font(.system(size: 13).monospaced())
-                            .tracking(3)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 9)
-                            .padding(.trailing, 6)   // tracking adds space after the last glyph
-                            .padding(.vertical, 5)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
-                            )
+                HStack {
+                    // Brandbook 7.2 switch reflecting the terminal's open state.
+                    Toggle("", isOn: Binding(get: { state.isOpen }, set: { _ in onToggleTerminal() }))
+                        .toggleStyle(.switch)
+                        .scaleEffect(0.55)
+                        .frame(width: 36, height: 20)
+                        .tint(AppColors.brand)
+                        .labelsHidden()
+                    HoverButton(action: onToggleTerminal) {
+                        HStack {
+                            Text("Toggle FinderTerminal")
+                                .font(.system(size: 13))
+                            Spacer()
+                            Text("⌘⌥§")
+                                .font(.system(size: 13).monospaced())
+                                .tracking(3)
+                                .foregroundStyle(.secondary)
+                                .padding(.leading, 9)
+                                .padding(.trailing, 6)   // tracking adds space after the last glyph
+                                .padding(.vertical, 5)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
+                                )
+                        }
+                        .expandTapTarget()
                     }
-                    .expandTapTarget()
+                    .cursor(.pointingHand)
                 }
-                .cursor(.pointingHand)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("POSITION")

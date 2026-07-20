@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: Hotkey?
     private let session = TerminalSession()
     private let tracker = WindowTracker()
+    private let termState = TerminalState()
     private lazy var panel = TerminalPanel(terminal: session.view)
 
     /// Terminal strip is "open" (session docked), even while temporarily hidden
@@ -69,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.onWindowClosed = { [weak self] in
             guard let self, self.terminalOpen else { return }
             self.terminalOpen = false
+            self.termState.isOpen = false
             self.shrunkBy = 0                        // window is gone; nothing to restore
             self.stopFollowing()
             self.panel.hide()
@@ -145,6 +147,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "panelFrame": NSStringFromRect(panel.frame),
             "panelVisible": panel.isShown,
             "chromeColor": panel.debugChromeColor,
+            "font": "\(session.view.font.fontName) \(session.view.font.pointSize)",
+            "lineSpacing": session.view.lineSpacing,
         ]
         if let f = tracker.currentFrame() { meta["finderFrame"] = NSStringFromRect(f) }
         if let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) {
@@ -209,6 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         side = AppSettings.position
         panel.side = side
         terminalOpen = true
+        termState.isOpen = true
         openDockedOrFallback()
     }
 
@@ -308,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeTerminal() {
         terminalOpen = false
+        termState.isOpen = false
         stopFollowing()
         panel.hide()
         tracker.stopObserving()
@@ -463,6 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         let host = NSHostingController(rootView: PopoverContentView(
+            state: termState,
             onToggleTerminal: { [weak self] in
                 self?.popover.performClose(nil)
                 self?.toggleTerminal()
