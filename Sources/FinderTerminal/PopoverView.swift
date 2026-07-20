@@ -111,12 +111,12 @@ struct PopoverContentView: View {
 
             // CONTENT
             VStack(alignment: .leading, spacing: 16) {
-                HStack {
-                    // Brandbook 7.2 switch reflecting the terminal's open state.
+                HStack(spacing: 8) {   // same gap as icon-to-text in the header
+                    // Switch reflecting the terminal's open state. Native mini size —
+                    // no scale/frame tricks, so it lays out and aligns correctly.
                     Toggle("", isOn: Binding(get: { state.isOpen }, set: { _ in onToggleTerminal() }))
                         .toggleStyle(.switch)
-                        .scaleEffect(0.55)
-                        .frame(width: 36, height: 20)
+                        .controlSize(.mini)
                         .tint(AppColors.brand)
                         .labelsHidden()
                     HoverButton(action: onToggleTerminal) {
