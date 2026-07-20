@@ -123,9 +123,9 @@ final class TerminalPanel: NSPanel {
         }
     }
 
-    /// Goran-specified exact chrome shade: #1E1D22.
+    /// Goran-specified exact chrome shade: #1B1B1B.
     private func chromeColor() -> CGColor {
-        CGColor(srgbRed: 0x1E / 255.0, green: 0x1D / 255.0, blue: 0x22 / 255.0, alpha: 1)
+        CGColor(srgbRed: 0x1B / 255.0, green: 0x1B / 255.0, blue: 0x1B / 255.0, alpha: 1)
     }
 
     /// Match the current theme: plate gets the theme background (opaque — it sits
