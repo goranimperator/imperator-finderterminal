@@ -8,10 +8,11 @@ enum DockSide: String, CaseIterable, Identifiable {
     var isVertical: Bool { self == .left || self == .right }
 }
 
-/// Terminal theme selection: follow Terminal.app's default profile, one of the
-/// ten classic Terminal.app presets, or fully custom colors.
-enum ThemeChoice: String, CaseIterable, Identifiable {
-    case profile = "Terminal.app Profile"
+/// Built-in theme palettes: the ten classic Terminal.app profiles plus a set of
+/// popular dark themes. Values: (background, text, cursor, selection).
+enum BuiltInTheme: String, CaseIterable, Identifiable {
+    case imperatorRed = "Imperator Red"
+    case imperatorGreen = "Imperator Green"
     case basic = "Basic"
     case grass = "Grass"
     case homebrew = "Homebrew"
@@ -22,57 +23,130 @@ enum ThemeChoice: String, CaseIterable, Identifiable {
     case redSands = "Red Sands"
     case silverAerogel = "Silver Aerogel"
     case solidColors = "Solid Colors"
-    case custom = "Custom"
+    case dracula = "Dracula"
+    case solarizedDark = "Solarized Dark"
+    case monokai = "Monokai"
+    case nord = "Nord"
+    case oneDark = "One Dark"
+    case gruvboxDark = "Gruvbox Dark"
+    case tokyoNight = "Tokyo Night"
     var id: String { rawValue }
+
+    var palette: (bg: String, fg: String, cursor: String, selection: String) {
+        switch self {
+        case .imperatorRed: ("#000000", "#D0342C", "#D0342C", "#264F78")
+        case .imperatorGreen: ("#000000E5", "#28FE14", "#38FE27", "#0B2EEDA5")
+        case .basic: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF")
+        case .grass: ("#13773D", "#FFF0A5", "#8C2800", "#B64926")
+        case .homebrew: ("#000000", "#28FE14", "#38FF12", "#083905")
+        case .manPage: ("#FEF49C", "#000000", "#7F7F7F", "#A5CDFF")
+        case .novel: ("#DFDBC3", "#3B2322", "#73635A", "#A4A390")
+        case .ocean: ("#224FBC", "#FFFFFF", "#7F7F7F", "#216DFF")
+        case .pro: ("#000000", "#F2F2F2", "#4D4D4D", "#414141")
+        case .redSands: ("#7A251E", "#D7C9A7", "#FFFFFF", "#A4A390")
+        case .silverAerogel: ("#929292", "#000000", "#939393", "#C1DDFF")
+        case .solidColors: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF")
+        case .dracula: ("#282A36", "#F8F8F2", "#F8F8F2", "#44475A")
+        case .solarizedDark: ("#002B36", "#839496", "#839496", "#073642")
+        case .monokai: ("#272822", "#F8F8F2", "#F8F8F2", "#49483E")
+        case .nord: ("#2E3440", "#D8DEE9", "#D8DEE9", "#434C5E")
+        case .oneDark: ("#282C34", "#ABB2BF", "#528BFF", "#3E4451")
+        case .gruvboxDark: ("#282828", "#EBDBB2", "#EBDBB2", "#504945")
+        case .tokyoNight: ("#1A1B26", "#A9B1D6", "#C0CAF5", "#33467C")
+        }
+    }
+}
+
+/// A user-created theme, persisted as JSON in UserDefaults.
+struct CustomTheme: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var name: String
+    var background: String
+    var text: String
+    var cursor: String
+    var selection: String
+
+    static func fresh(number: Int) -> CustomTheme {
+        CustomTheme(name: "My Theme \(number)",
+                    background: AppSettings.defaultCustomBackground,
+                    text: AppSettings.defaultCustomText,
+                    cursor: AppSettings.defaultCustomCursor,
+                    selection: AppSettings.defaultCustomSelection)
+    }
+}
+
+/// What the terminal theme follows. Persisted as a string:
+/// "profile" | "preset:<BuiltInTheme raw>" | "custom:<uuid>".
+enum ThemeSelection: Equatable {
+    case profile
+    case preset(BuiltInTheme)
+    case custom(UUID)
+
+    var storageValue: String {
+        switch self {
+        case .profile: "profile"
+        case .preset(let t): "preset:\(t.rawValue)"
+        case .custom(let id): "custom:\(id.uuidString)"
+        }
+    }
+
+    static func parse(_ s: String?) -> ThemeSelection {
+        guard let s else { return .profile }
+        if s == "profile" { return .profile }
+        if s.hasPrefix("preset:"), let t = BuiltInTheme(rawValue: String(s.dropFirst(7))) {
+            return .preset(t)
+        }
+        if s.hasPrefix("custom:"), let id = UUID(uuidString: String(s.dropFirst(7))) {
+            return .custom(id)
+        }
+        // Legacy values from the first settings version ("Terminal.app Profile",
+        // "Pro", "Custom", ...) — migrate transparently.
+        if s == "Custom" { return .profile }
+        if let t = BuiltInTheme(rawValue: s) { return .preset(t) }
+        return .profile
+    }
 }
 
 /// UserDefaults-backed app settings. Keys are shared with SwiftUI @AppStorage.
 enum AppSettings {
     static let themeKey = "ft.theme"
     static let positionKey = "ft.position"
-    static let customBackgroundKey = "ft.customBackground"
-    static let customTextKey = "ft.customText"
-    static let customCursorKey = "ft.customCursor"
-    static let customSelectionKey = "ft.customSelection"
+    static let customThemesKey = "ft.customThemes"
     static let fontSizeKey = "ft.fontSize"
 
-    // Imperator-flavored custom defaults (brandbook palette).
-    static let defaultCustomBackground = "#0A0A0A"
-    static let defaultCustomText = "#CFC8BD"
-    static let defaultCustomCursor = "#A01818"
-    static let defaultCustomSelection = "#A0181866"
+    // Defaults for a new custom theme: the Imperator Red palette.
+    static let defaultCustomBackground = "#000000"
+    static let defaultCustomText = "#D0342C"
+    static let defaultCustomCursor = "#D0342C"
+    static let defaultCustomSelection = "#264F78"
 
-    static var theme: ThemeChoice {
-        ThemeChoice(rawValue: UserDefaults.standard.string(forKey: themeKey) ?? "") ?? .profile
+    static var themeSelection: ThemeSelection {
+        ThemeSelection.parse(UserDefaults.standard.string(forKey: themeKey))
     }
 
     static var position: DockSide {
         DockSide(rawValue: UserDefaults.standard.string(forKey: positionKey) ?? "") ?? .bottom
     }
 
-    static var customBackground: NSColor {
-        NSColor(hex: UserDefaults.standard.string(forKey: customBackgroundKey) ?? defaultCustomBackground)
-            ?? NSColor(hex: defaultCustomBackground)!
-    }
-
-    static var customText: NSColor {
-        NSColor(hex: UserDefaults.standard.string(forKey: customTextKey) ?? defaultCustomText)
-            ?? NSColor(hex: defaultCustomText)!
-    }
-
-    static var customCursor: NSColor {
-        NSColor(hex: UserDefaults.standard.string(forKey: customCursorKey) ?? defaultCustomCursor)
-            ?? NSColor(hex: defaultCustomCursor)!
-    }
-
-    static var customSelection: NSColor {
-        NSColor(hex: UserDefaults.standard.string(forKey: customSelectionKey) ?? defaultCustomSelection)
-            ?? NSColor(hex: defaultCustomSelection)!
-    }
-
     /// 0 = follow the Terminal.app profile's font size.
     static var fontSize: CGFloat {
         CGFloat(UserDefaults.standard.double(forKey: fontSizeKey))
+    }
+
+    static var customThemes: [CustomTheme] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: customThemesKey),
+                  let themes = try? JSONDecoder().decode([CustomTheme].self, from: data)
+            else { return [] }
+            return themes
+        }
+        set {
+            UserDefaults.standard.set(try? JSONEncoder().encode(newValue), forKey: customThemesKey)
+        }
+    }
+
+    static func customTheme(id: UUID) -> CustomTheme? {
+        customThemes.first { $0.id == id }
     }
 }
 

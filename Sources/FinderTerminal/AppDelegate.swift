@@ -220,29 +220,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if dockToCurrentWindow() { return }
 
-        // No usable Finder window — the terminal must never float alone.
-        // Open a fresh one and dock once AX can see it.
-        FinderBridge.openNewWindow()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        // AX can be transiently slow (space switches, app activation) — retry once
+        // before resorting to a new window. A new window must be the LAST resort.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, self.terminalOpen, self.shrunkBy == 0 else { return }
-            if !self.dockToCurrentWindow() {
-                self.panel.show(at: TerminalPanel.quakeFrame())
+            if self.dockToCurrentWindow() { return }
+            self.devLog("both dock attempts failed -> opening new window")
+            FinderBridge.openNewWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self, self.terminalOpen, self.shrunkBy == 0 else { return }
+                if !self.dockToCurrentWindow() {
+                    self.panel.show(at: TerminalPanel.quakeFrame())
+                }
+                if let path = FinderBridge.frontmostFolder() { self.session.cd(to: path) }
             }
-            if let path = FinderBridge.frontmostFolder() { self.session.cd(to: path) }
         }
+    }
+
+    /// Finder applies AX position/size writes asynchronously; reading straight
+    /// back returns the old frame. Poll briefly until the frame changes.
+    private func devLog(_ s: String) {
+        let line = s + "\n"
+        let url = URL(fileURLWithPath: "/tmp/ft-dock.log")
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(line.data(using: .utf8)!)
+            try? h.close()
+        } else {
+            try? line.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private func settledFrame(after previous: CGRect) -> CGRect? {
+        let deadline = Date().addingTimeInterval(0.15)
+        while Date() < deadline {
+            if let f = tracker.currentFrame(), f != previous { return f }
+            usleep(20_000)
+        }
+        return tracker.currentFrame()
     }
 
     /// Attach to the frontmost Finder window, shrink it, and show the terminal
     /// in the freed space. Returns false if there is no usable window.
     private func dockToCurrentWindow() -> Bool {
         let extent = { (f: CGRect) in self.side.isVertical ? f.width : f.height }
-        guard let f = tracker.attachToFrontWindow(), extent(f) > 400 else { return false }
+        guard var f = tracker.attachToFrontWindow() else {
+            devLog("attachToFrontWindow -> nil")
+            return false
+        }
+        devLog("attached frame=\(f)")
+
+        // A small window is still the user's window — grow it toward the dock
+        // side to make room rather than opening a new one. The remainder after
+        // shrinking must stay above Finder's own minimum window size (~300),
+        // or the shrink gets clamped and docking fails.
+        let neededExtent = TerminalPanel.minTerminalHeight + TerminalPanel.gap + 320
+        if extent(f) < neededExtent {
+            tracker.adjust(side: side, by: neededExtent - extent(f))
+            let f2 = settledFrame(after: f) ?? f
+            devLog("grew to \(f2) needed \(neededExtent)")
+            if extent(f2) < neededExtent - 2 {
+                // Screen edge blocked the growth — undo and let the caller open
+                // a fresh window instead.
+                tracker.adjust(side: side, by: extent(f) - extent(f2))
+                return false
+            }
+            f = f2
+        }
+
         let wanted = min(TerminalPanel.defaultHeight + TerminalPanel.gap,
                          (extent(f) * 0.45).rounded())
         tracker.adjust(side: side, by: -wanted)
         // Verify what actually happened — AX resizes can silently clamp or fail
         // (was the cause of the panel covering Finder content).
-        let freed = (tracker.currentFrame().map { freedSpace(pre: f, post: $0) }) ?? 0
+        let freed = (settledFrame(after: f).map { freedSpace(pre: f, post: $0) }) ?? 0
         if freed >= TerminalPanel.minTerminalHeight + TerminalPanel.gap {
             shrunkBy = freed
             terminalHeight = freed - TerminalPanel.gap
@@ -342,11 +393,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func settingsFingerprint() -> String {
         let d = UserDefaults.standard
-        return [AppSettings.themeKey, AppSettings.positionKey, AppSettings.customBackgroundKey,
-                AppSettings.customTextKey, AppSettings.customCursorKey,
-                AppSettings.customSelectionKey, AppSettings.fontSizeKey]
+        let keys = [AppSettings.themeKey, AppSettings.positionKey, AppSettings.fontSizeKey]
             .map { d.string(forKey: $0) ?? String(d.double(forKey: $0)) }
-            .joined(separator: "|")
+        let themes = d.data(forKey: AppSettings.customThemesKey)?.hashValue ?? 0
+        return keys.joined(separator: "|") + "|\(themes)"
     }
 
     @objc private func settingsChanged() {
@@ -369,10 +419,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let win = settingsWindow ?? {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 640),
+            // Initial height = just what the collapsed content needs; user can
+            // resize vertically (width is fixed — single column).
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 325),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
+            w.minSize = NSSize(width: 360, height: 280)
+            w.maxSize = NSSize(width: 360, height: 2000)
             // Just above the floating terminal panel — settings must never end up behind it.
             w.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
             return w
@@ -446,9 +500,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.isMovableByWindowBackground = true
             panel.isReleasedWhenClosed = false
             panel.contentViewController = NSHostingController(rootView: AboutView())
-            panel.center()
             aboutPanel = panel
         }
+        aboutPanel?.center()                          // centered on every open
         aboutPanel?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

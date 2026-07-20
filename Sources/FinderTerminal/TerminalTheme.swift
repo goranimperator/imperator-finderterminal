@@ -28,39 +28,27 @@ struct TerminalTheme {
         "ANSIBrightBlueColor", "ANSIBrightMagentaColor", "ANSIBrightCyanColor", "ANSIBrightWhiteColor",
     ]
 
-    /// The ten classic Terminal.app profile palettes: (background, text, cursor, selection).
-    private static let presets: [ThemeChoice: (String, String, String, String)] = [
-        .basic: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF"),
-        .grass: ("#13773D", "#FFF0A5", "#8C2800", "#B64926"),
-        .homebrew: ("#000000", "#28FE14", "#38FF12", "#083905"),
-        .manPage: ("#FEF49C", "#000000", "#7F7F7F", "#A5CDFF"),
-        .novel: ("#DFDBC3", "#3B2322", "#73635A", "#A4A390"),
-        .ocean: ("#224FBC", "#FFFFFF", "#7F7F7F", "#216DFF"),
-        .pro: ("#000000", "#F2F2F2", "#4D4D4D", "#414141"),
-        .redSands: ("#7A251E", "#D7C9A7", "#FFFFFF", "#A4A390"),
-        .silverAerogel: ("#929292", "#000000", "#939393", "#C1DDFF"),
-        .solidColors: ("#FFFFFF", "#000000", "#7F7F7F", "#A5CDFF"),
-    ]
-
-    /// Theme for the current AppSettings selection. Presets and custom reuse the
-    /// Terminal.app profile's font and ANSI palette; only the core colors change.
+    /// Theme for the current AppSettings selection. Presets and custom themes
+    /// reuse the Terminal.app profile's font and ANSI palette; only the core
+    /// colors change.
     static func current() -> TerminalTheme {
         var t = fromTerminalApp()
-        switch AppSettings.theme {
+        switch AppSettings.themeSelection {
         case .profile:
             break
-        case .custom:
-            t.background = AppSettings.customBackground
-            t.foreground = AppSettings.customText
-            t.cursor = AppSettings.customCursor
-            t.selection = AppSettings.customSelection
+        case .preset(let preset):
+            let p = preset.palette
+            t.background = NSColor(hex: p.bg)
+            t.foreground = NSColor(hex: p.fg)
+            t.cursor = NSColor(hex: p.cursor)
+            t.selection = NSColor(hex: p.selection)
             t.blur = 0
-        case let choice:
-            if let (bg, fg, cur, sel) = presets[choice] {
-                t.background = NSColor(hex: bg)
-                t.foreground = NSColor(hex: fg)
-                t.cursor = NSColor(hex: cur)
-                t.selection = NSColor(hex: sel)
+        case .custom(let id):
+            if let c = AppSettings.customTheme(id: id) {
+                t.background = NSColor(hex: c.background)
+                t.foreground = NSColor(hex: c.text)
+                t.cursor = NSColor(hex: c.cursor)
+                t.selection = NSColor(hex: c.selection)
                 t.blur = 0
             }
         }
