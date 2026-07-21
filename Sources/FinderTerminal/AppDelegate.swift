@@ -44,6 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Mouse-riding drag follow + z-order upkeep, fanned out to every terminal.
         mouseMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: { [weak self] _ in
+                self?.terminals.values.forEach { $0.armDrag() }
+            }),
             NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged], handler: { [weak self] _ in
                 self?.terminals.values.forEach { $0.predictDragPosition() }
             }),

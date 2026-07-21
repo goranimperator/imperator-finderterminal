@@ -16,6 +16,9 @@ final class DockedTerminal {
     private var lastBodyRect = CGRect.zero
     private var displayLink: CADisplayLink?
     private var dragBase: (finder: CGRect, mouse: CGPoint)?
+    /// Snapshot taken at mouseDown, before anything moves — the only moment
+    /// the window frame and mouse position pair exactly.
+    private var pendingDragAnchor: (finder: CGRect, mouse: CGPoint)?
     /// Set while the Cmd-W flow already handled termination — suppresses the
     /// post-close alert when the AX destroyed notification arrives.
     private var suppressCloseAlert = false
@@ -87,10 +90,16 @@ final class DockedTerminal {
         tracker.onGeometryChange = { [weak self] in
             guard let self else { return }
             if NSEvent.pressedMouseButtons & 1 != 0, let f = self.tracker.currentFrame() {
-                if let base = self.dragBase, base.finder.size != f.size {
-                    self.dragBase = nil
+                if let base = self.dragBase {
+                    // Size change = a resize, not a move: prediction would
+                    // misplace the panel — fall back to display-link polling.
+                    if base.finder.size != f.size { self.dragBase = nil }
                 } else {
-                    self.dragBase = (f, NSEvent.mouseLocation)
+                    // A drag is confirmed (the window actually moved). Anchor
+                    // on the exact mouseDown pairing when we have it; the AX
+                    // frame here is a frame stale against the fresh mouse and
+                    // would bake in a constant offset.
+                    self.dragBase = self.pendingDragAnchor ?? (f, NSEvent.mouseLocation)
                 }
             } else {
                 self.dragBase = nil
@@ -164,6 +173,19 @@ final class DockedTerminal {
         panel.order(.above, relativeTo: Int(num))
     }
 
+    /// mouseDown snapshot (fed from the global mouseDown monitor). Prediction
+    /// activates on the first geometry notification — which only arrives when
+    /// the window really moves, so inner drags (text selection, file
+    /// marquee) never drive the panel.
+    func armDrag() {
+        guard shrunkBy > 0, let f = tracker.currentFrame(),
+              f.contains(NSEvent.mouseLocation) else {
+            pendingDragAnchor = nil
+            return
+        }
+        pendingDragAnchor = (f, NSEvent.mouseLocation)
+    }
+
     /// Mouse-riding drag prediction (fed from the global drag monitor).
     func predictDragPosition() {
         guard shrunkBy > 0, let base = dragBase else { return }
@@ -178,6 +200,7 @@ final class DockedTerminal {
 
     func settleDrag() {
         dragBase = nil
+        pendingDragAnchor = nil
         redock()
         reassertOrder()
     }
