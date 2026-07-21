@@ -69,6 +69,17 @@ final class WindowTracker {
         rawFrame().map(Self.axToCocoa)
     }
 
+    /// Finder applies AX position/size writes asynchronously; reading straight
+    /// back returns the old frame. Poll briefly until the frame changes.
+    func settledFrame(after previous: CGRect) -> CGRect? {
+        let deadline = Date().addingTimeInterval(0.15)
+        while Date() < deadline {
+            if let f = currentFrame(), f != previous { return f }
+            usleep(20_000)
+        }
+        return currentFrame()
+    }
+
     /// CGWindowID of the tracked window, resolved by matching the AX frame
     /// against Finder's on-screen windows. Used to slot the terminal panel
     /// directly above its Finder window in the global z-order.
@@ -118,6 +129,17 @@ final class WindowTracker {
         }
     }
 
+    /// Press the tracked window's close button (AX) — closes the Finder window
+    /// exactly like clicking the red button.
+    func pressCloseButton() {
+        guard let w = window else { return }
+        var btn: CFTypeRef?
+        if AXUIElementCopyAttributeValue(w, kAXCloseButtonAttribute as CFString, &btn) == .success,
+           let b = btn {
+            AXUIElementPerformAction(b as! AXUIElement, kAXPressAction as CFString)
+        }
+    }
+
     /// AX reports top-left origin measured from the menu-bar screen; Cocoa is bottom-left.
     static func axToCocoa(_ r: CGRect) -> CGRect {
         let menuBarScreen = NSScreen.screens.first { $0.frame.origin == .zero } ?? NSScreen.main
@@ -140,8 +162,8 @@ final class WindowTracker {
             let note = notification as String
             DispatchQueue.main.async {
                 switch note {
-                case kAXTitleChangedNotification as String: me.onFolderChange?()
-                case kAXUIElementDestroyedNotification as String: me.onWindowClosed?()
+                case kAXTitleChangedNotification: me.onFolderChange?()
+                case kAXUIElementDestroyedNotification: me.onWindowClosed?()
                 default: me.onGeometryChange?()
                 }
             }

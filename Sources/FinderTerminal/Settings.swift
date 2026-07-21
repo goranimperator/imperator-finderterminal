@@ -113,6 +113,24 @@ enum AppSettings {
     static let positionKey = "ft.position"
     static let customThemesKey = "ft.customThemes"
     static let fontSizeKey = "ft.fontSize"
+    static let hotkeyKeyCodeKey = "ft.hotkeyKeyCode"
+    static let hotkeyModifiersKey = "ft.hotkeyModifiers"
+    static let alertModeKey = "ft.alertMode"
+
+    /// True (default) = warn on every close of a window with a terminal;
+    /// false ("busy") = warn only when a process is running.
+    static var alertAlways: Bool {
+        UserDefaults.standard.string(forKey: alertModeKey) != "busy"
+    }
+
+    /// Carbon key code + Carbon modifier mask for the toggle hotkey.
+    /// Default: Command-Option-Section (kVK_ISO_Section = 10, cmd|opt = 256|2048).
+    static var hotkey: (keyCode: UInt32, modifiers: UInt32) {
+        let d = UserDefaults.standard
+        let code = d.object(forKey: hotkeyKeyCodeKey) as? Int ?? 10
+        let mods = d.object(forKey: hotkeyModifiersKey) as? Int ?? (256 | 2048)
+        return (UInt32(code), UInt32(mods))
+    }
 
     // Defaults for a new custom theme: the Imperator Red palette.
     static let defaultCustomBackground = "#000000"

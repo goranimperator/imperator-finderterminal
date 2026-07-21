@@ -246,6 +246,9 @@ final class TerminalPanel: NSPanel {
     }
 
     func hide() {
+        // A sheet on a hidden panel would linger invisibly; .stop matches no
+        // alert button, so pending completions become no-ops.
+        if let sheet = attachedSheet { endSheet(sheet, returnCode: .stop) }
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.1
             animator().alphaValue = 0

@@ -5,7 +5,6 @@ import SwiftUI
 /// a rotating chevron, 11pt semibold uppercase labels.
 struct SettingsView: View {
     @AppStorage(AppSettings.themeKey) private var themeSelection = ThemeSelection.profile.storageValue
-    @AppStorage(AppSettings.positionKey) private var position = DockSide.bottom.rawValue
     @AppStorage(AppSettings.fontSizeKey) private var fontSize = 0.0
     @State private var customThemes = AppSettings.customThemes
     @State private var themesExpanded = false
@@ -50,7 +49,7 @@ struct SettingsView: View {
 
                 staticSection("Font Size") {
                     HStack(spacing: 8) {
-                        Slider(value: $fontSize, in: 0...24, step: 1)
+                        SettingsSlider(value: $fontSize, range: 0...24, step: 1)
                             .frame(maxWidth: 240)
                         Text(fontSize <= 0 ? "Auto" : "\(Int(fontSize)) pt")
                             .font(.caption.monospacedDigit())
@@ -64,15 +63,23 @@ struct SettingsView: View {
 
                 Divider()
 
+                // Same controls as the popover, same order.
+                ShortcutSettings()
+                    .frame(maxWidth: 340)
+
+                Divider()
+
+                staticSection("Alerts") {
+                    AlertsRadios()
+                        .frame(maxWidth: 340)
+                }
+
+                Divider()
+
                 // Position is independent of theme: it applies no matter what.
                 staticSection("Position") {
-                    HStack(spacing: 0) {
-                        ForEach(DockSide.allCases) { s in
-                            positionRadio(s)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .frame(maxWidth: 340)
+                    PositionRadios()
+                        .frame(maxWidth: 340)
                 }
             }
             .padding(20)
@@ -192,12 +199,12 @@ struct SettingsView: View {
                 withAnimation(.easeInOut(duration: 0.2)) { expanded.wrappedValue.toggle() }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .medium))
-                        .rotationEffect(.degrees(expanded.wrappedValue ? 90 : 0))
                     Text(title.uppercased())
                         .font(.system(size: 11, weight: .semibold))
                     Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .medium))
+                        .rotationEffect(.degrees(expanded.wrappedValue ? 180 : 0))
                 }
                 .foregroundStyle(.secondary)
                 .expandTapTarget()
@@ -208,24 +215,6 @@ struct SettingsView: View {
                 content()
             }
         }
-    }
-
-    private func positionRadio(_ s: DockSide) -> some View {
-        let selected = position == s.rawValue
-        return Button {
-            position = s.rawValue
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(selected ? AppColors.brand : Color.secondary)
-                Text(s.label)
-                    .font(.system(size: 11))
-            }
-            .expandTapTarget()
-        }
-        .buttonStyle(.plain)
-        .cursor(.pointingHand)
     }
 
     private func colorRow(_ label: String, _ hex: Binding<String>) -> some View {
@@ -244,6 +233,42 @@ struct SettingsView: View {
             get: { Color(nsColor: NSColor(hex: hex.wrappedValue) ?? .black) },
             set: { hex.wrappedValue = NSColor($0).hexString }
         )
+    }
+}
+
+/// Brandbook 7.3 slider: 4pt capsule track, brand fill, 14pt knob (brand red —
+/// Goran's spec), 20pt container, drag anywhere on the track.
+private struct SettingsSlider: View {
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            let frac = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
+            let knobX = frac * (geo.size.width - 14)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(height: 4)
+                Capsule()
+                    .fill(AppColors.brand)
+                    .frame(width: knobX + 7, height: 4)
+                Circle()
+                    .fill(AppColors.brand)
+                    .frame(width: 14, height: 14)
+                    .shadow(color: .black.opacity(0.3), radius: 2, y: 1)
+                    .offset(x: knobX)
+            }
+            .frame(height: 20)
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+                let f = min(max(0, g.location.x / geo.size.width), 1)
+                let raw = range.lowerBound + f * (range.upperBound - range.lowerBound)
+                value = (raw / step).rounded() * step
+            })
+        }
+        .frame(height: 20)
     }
 }
 

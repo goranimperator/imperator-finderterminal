@@ -66,6 +66,39 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         view.send(txt: "\u{15}cd \(PathUtil.shellQuote(path))\r")
     }
 
+    /// Names of processes currently running under the shell (empty = idle prompt).
+    func runningProcessNames() -> [String] {
+        guard started, view.process.shellPid > 0 else { return [] }
+        // -l lists "pid name" per line — one spawn instead of pgrep + ps-per-pid.
+        return Self.run("/usr/bin/pgrep", ["-lP", "\(view.process.shellPid)"])
+            .split(separator: "\n")
+            .compactMap { line in
+                line.split(separator: " ", maxSplits: 1)
+                    .dropFirst().first.map { String($0) }
+            }
+    }
+
+    /// Kill the shell and everything under it, like closing a real terminal
+    /// window: SIGHUP to the shell's process group.
+    func terminate() {
+        guard started else { return }
+        let pid = view.process.shellPid
+        if pid > 0 { kill(-pid, SIGHUP) }
+        started = false
+        currentDir = nil
+    }
+
+    private static func run(_ path: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        try? p.run()
+        p.waitUntilExit()
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
     // MARK: LocalProcessTerminalViewDelegate
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {

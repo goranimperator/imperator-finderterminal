@@ -6,35 +6,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var eventMonitor: Any?
     private var hotkey: Hotkey?
-    private let session = TerminalSession()
-    private let tracker = WindowTracker()
-    private let termState = TerminalState()
-    private lazy var panel = TerminalPanel(terminal: session.view)
-
-    /// Terminal strip is "open" (session docked), even while temporarily hidden
-    /// because another app is frontmost.
-    private var terminalOpen = false
-    /// Total points we shaved off the Finder window (to give back on close);
-    /// 0 = quake fallback mode.
-    private var shrunkBy: CGFloat = 0
-    /// Current terminal thickness (height for top/bottom, width for left/right) —
-    /// independent of `shrunkBy` once the user resizes the outer edge.
-    private var terminalHeight: CGFloat = 0
-    /// Docking side frozen at open time (settings may change while open).
-    private var side: DockSide = .bottom
-    /// Per-frame follower: polls the Finder frame on every display refresh while
-    /// the panel is visible, so dragging never lags behind by more than a frame.
-    private var displayLink: CADisplayLink?
-    private var lastBodyRect = CGRect.zero
-    /// Mouse-riding drag prediction: while the Finder window is being moved, its
-    /// motion is the mouse's motion. Anchoring the last AX-known frame to the mouse
-    /// lets the panel move in the same event stream as the drag — zero perceived
-    /// lag — while AX notifications keep re-anchoring the base (handles edge snap).
-    private var dragBase: (finder: CGRect, mouse: CGPoint)?
+    private var keyTap: KeyTap?
     private var mouseMonitors: [Any] = []
     private var devRemote: DevRemote?
     private var settingsWindow: NSWindow?
     private var lastSettingsFingerprint = ""
+
+    /// One terminal per Finder window, keyed by CGWindowID.
+    private var terminals: [CGWindowID: DockedTerminal] = [:]
+    /// Pre-spawned shell so the next open shows a ready prompt instantly.
+    private var spareSession: TerminalSession?
+
+    /// Quake fallback (no Accessibility): a single free-floating terminal.
+    private var quakeSession: TerminalSession?
+    private var quakePanel: TerminalPanel?
+    private var quakeOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Brandbook 18.1: force dark mode, override accent, set process name.
@@ -46,348 +32,181 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         promptAccessibility()
 
-        tracker.onGeometryChange = { [weak self] in
-            guard let self else { return }
-            // Re-anchor the drag prediction on every AX ground truth. A size change
-            // means the window is being resized, not moved — mouse prediction would
-            // move the panel the wrong way, so hand over to display-link polling.
-            if NSEvent.pressedMouseButtons & 1 != 0, let f = self.tracker.currentFrame() {
-                if let base = self.dragBase, base.finder.size != f.size {
-                    self.dragBase = nil
-                } else {
-                    self.dragBase = (f, NSEvent.mouseLocation)
-                }
-            } else {
-                self.dragBase = nil
-            }
-            self.redock()
-            self.reassertOrder()                     // dragging raises the Finder window
-        }
-        tracker.onFolderChange = { [weak self] in
-            guard let self, self.terminalOpen, let path = FinderBridge.frontmostFolder() else { return }
-            self.session.cd(to: path)
-        }
-        tracker.onWindowClosed = { [weak self] in
-            guard let self, self.terminalOpen else { return }
-            self.terminalOpen = false
-            self.termState.isOpen = false
-            self.shrunkBy = 0                        // window is gone; nothing to restore
-            self.stopFollowing()
-            self.panel.hide()
-            self.tracker.stopObserving()
-        }
-        session.onDirChangeFromShell = { path in
-            FinderBridge.navigate(to: path)
-        }
-
-        // Gap splitter: trades space between the Finder window and the terminal, live.
-        panel.onResizeDrag = { [weak self] delta in
-            guard let self, self.terminalOpen, self.shrunkBy > 0,
-                  let f = self.tracker.currentFrame() else { return }
-            let finderExtent = self.side.isVertical ? f.width : f.height
-            let maxGrow = finderExtent - 300                    // keep Finder usable
-            let diff = max(TerminalPanel.minTerminalHeight - self.terminalHeight, min(delta, maxGrow))
-            guard abs(diff) > 0.5 else { return }
-            self.tracker.adjust(side: self.side, by: -diff)
-            self.shrunkBy += diff
-            self.terminalHeight += diff
-            self.redock()
-        }
-
-        // Outer edge resizes like a normal window (Finder untouched).
-        panel.onBottomResizeDrag = { [weak self] delta in
-            guard let self, self.terminalOpen, self.shrunkBy > 0 else { return }
-            self.terminalHeight = max(TerminalPanel.minTerminalHeight, self.terminalHeight + delta)
-            self.redock()
-        }
-
-        // Live-apply settings changes (theme colors, font size, dock side).
+        // Live-apply settings changes (theme colors, font size, hotkey).
         NotificationCenter.default.addObserver(
             self, selector: #selector(settingsChanged),
             name: UserDefaults.didChangeNotification, object: nil)
         lastSettingsFingerprint = Self.settingsFingerprint()
 
-        // Hide the strip while neither Finder nor this app is frontmost (it must
-        // never float above other apps), show it again when Finder returns.
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(frontAppChanged(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
 
-        // Mouse-riding drag follow: move the panel inside the drag's own event
-        // stream instead of waiting for AX to report the window position.
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] _ in
-            self?.predictDragPosition()
-        } { mouseMonitors.append(m) }
-        if let m = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            guard let self else { return }
-            self.dragBase = nil
-            self.redock()                            // settle on AX ground truth
-            self.reassertOrder()                     // clicks can reshuffle window order
-        } { mouseMonitors.append(m) }
+        // Mouse-riding drag follow + z-order upkeep, fanned out to every terminal.
+        mouseMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged], handler: { [weak self] _ in
+                self?.terminals.values.forEach { $0.predictDragPosition() }
+            }),
+            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp], handler: { [weak self] _ in
+                self?.terminals.values.forEach { $0.settleDrag() }
+            }),
+        ].compactMap { $0 }
 
         hotkey = Hotkey { [weak self] in self?.toggleTerminal() }
 
+        // Intercept Cmd-W before Finder closes a window that has a busy terminal,
+        // so the warning can veto the close (red button can't be intercepted).
+        let tap = KeyTap()
+        tap.onCmdW = { [weak self] in
+            // confirmCloseFromKeyboard handles both busy (ask) and idle (close
+            // immediately). Two focus cases: Finder frontmost (its front window
+            // has a terminal), or our own terminal panel focused — the panel
+            // steals key focus on open, so Cmd-W usually lands here.
+            guard let self, let t = self.cmdWTarget() else { return false }
+            // Defer the alert flow out of event-tap processing.
+            DispatchQueue.main.async { t.confirmCloseFromKeyboard() }
+            return true
+        }
+        keyTap = tap
+
         devRemote = DevRemote(
             onToggle: { [weak self] in self?.toggleTerminal() },
-            onSnapshot: { [weak self] path in self?.devSnapshot(to: path) }
+            onSnapshot: { [weak self] path in self?.devSnapshot(to: path) },
+            onExec: { [weak self] cmd in self?.frontTerminalSession()?.view.send(txt: cmd + "\r") }
         )
 
-        // Pre-spawn the shell so the first toggle shows a ready prompt instead of
-        // paying zsh login/rc startup time. The first open cd:s it to the right folder.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.session.startIfNeeded(dir: NSHomeDirectory())
-        }
-    }
-
-    /// Write the panel's rendered content + geometry state for headless verification.
-    private func devSnapshot(to path: String) {
-        var meta: [String: Any] = [
-            "terminalOpen": terminalOpen,
-            "shrunkBy": shrunkBy,
-            "panelFrame": NSStringFromRect(panel.frame),
-            "panelVisible": panel.isShown,
-            "chromeColor": panel.debugChromeColor,
-            "font": "\(session.view.font.fontName) \(session.view.font.pointSize)",
-            "lineSpacing": session.view.lineSpacing,
-        ]
-        if let f = tracker.currentFrame() { meta["finderFrame"] = NSStringFromRect(f) }
-        if let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) {
-            try? data.write(to: URL(fileURLWithPath: path + ".json"))
-        }
-        guard let v = panel.contentView,
-              let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
-        v.cacheDisplay(in: v.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?
-            .write(to: URL(fileURLWithPath: path + ".png"))
+        refillSpare()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if terminalOpen, shrunkBy > 0 { tracker.adjust(side: side, by: shrunkBy) }
+        terminals.values.forEach { $0.restoreOnQuit() }
     }
 
-    /// How much space the shrink actually freed on the docking side.
-    private func freedSpace(pre f: CGRect, post f2: CGRect) -> CGFloat {
-        switch side {
-        case .bottom: f2.minY - f.minY
-        case .top: f.maxY - f2.maxY
-        case .left: f2.minX - f.minX
-        case .right: f.maxX - f2.maxX
-        }
-    }
-
-    /// The terminal body rect for the current Finder frame: glued `gap` points
-    /// off the docking edge, `terminalHeight` thick, matching Finder's other axis.
-    private func bodyRect(finder f: CGRect) -> CGRect {
-        let g = TerminalPanel.gap
-        let t = terminalHeight
-        return switch side {
-        case .bottom: CGRect(x: f.minX, y: f.minY - g - t, width: f.width, height: t)
-        case .top: CGRect(x: f.minX, y: f.maxY + g, width: f.width, height: t)
-        case .left: CGRect(x: f.minX - g - t, y: f.minY, width: t, height: f.height)
-        case .right: CGRect(x: f.maxX + g, y: f.minY, width: t, height: f.height)
-        }
-    }
+    // MARK: Toggle / open
 
     @objc private func toggleTerminal() {
-        if terminalOpen {
-            if panel.isShown {
-                closeTerminal()
-            } else if shrunkBy > 0 {
-                // Docked but hidden (another app was frontmost): bring it back.
-                panel.orderFrontRegardless()
-                NSApp.activate(ignoringOtherApps: true)
-                panel.makeKey()
-                redock()
-            } else {
-                // Open but never properly docked — retry the full docking flow.
-                openDockedOrFallback()
-            }
+        guard WindowTracker.isTrusted else { toggleQuake(); return }
+
+        if let id = frontmostFinderWindowID(), let t = terminals[id] {
+            t.requestClose()
             return
         }
-
-        let folder = FinderBridge.frontmostFolder() ?? NSHomeDirectory()
-        session.startIfNeeded(dir: folder)
-        session.cd(to: folder)                       // no-op on first spawn (already in folder)
-        panel.applyTheme(session.applyTheme())       // re-read theme on every open
-
-        side = AppSettings.position
-        panel.side = side
-        terminalOpen = true
-        termState.isOpen = true
-        openDockedOrFallback()
+        openOnFrontmostWindow(allowNewWindow: true)
     }
 
-    private func openDockedOrFallback() {
-        guard WindowTracker.isTrusted else {
-            shrunkBy = 0
-            panel.show(at: TerminalPanel.quakeFrame())
+    private func frontmostFinderWindowID() -> CGWindowID? {
+        let probe = WindowTracker()
+        guard probe.attachToFrontWindow() != nil else { return nil }
+        return probe.windowNumber()
+    }
+
+    /// The terminal a Cmd-W press is aimed at, if any.
+    private func cmdWTarget() -> DockedTerminal? {
+        switch NSWorkspace.shared.frontmostApplication?.bundleIdentifier {
+        case "com.apple.finder":
+            return frontmostFinderWindowID().flatMap { terminals[$0] }
+        case Bundle.main.bundleIdentifier:
+            guard let panel = NSApp.keyWindow as? TerminalPanel else { return nil }
+            return terminals.values.first { $0.panel === panel }
+        default:
+            return nil
+        }
+    }
+
+    private func frontTerminalSession() -> TerminalSession? {
+        if let id = frontmostFinderWindowID(), let t = terminals[id] { return t.session }
+        return terminals.values.first?.session ?? quakeSession
+    }
+
+    private func openOnFrontmostWindow(allowNewWindow: Bool) {
+        let session = takeSpareSession()
+        if let t = DockedTerminal(session: session, side: AppSettings.position) {
+            adopt(t)
             return
         }
-        if dockToCurrentWindow() { return }
-
-        // AX can be transiently slow (space switches, app activation) — retry once
-        // before resorting to a new window. A new window must be the LAST resort.
+        // AX can be transiently slow — retry once before opening a new window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self, self.terminalOpen, self.shrunkBy == 0 else { return }
-            if self.dockToCurrentWindow() { return }
-            self.devLog("both dock attempts failed -> opening new window")
+            guard let self else { return }
+            if let t = DockedTerminal(session: session, side: AppSettings.position) {
+                self.adopt(t)
+                return
+            }
+            guard allowNewWindow else { session.terminate(); return }
+            devLog("both dock attempts failed -> opening new window")
             FinderBridge.openNewWindow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self, self.terminalOpen, self.shrunkBy == 0 else { return }
-                if !self.dockToCurrentWindow() {
-                    self.panel.show(at: TerminalPanel.quakeFrame())
+                guard let self else { return }
+                if let t = DockedTerminal(session: session, side: AppSettings.position) {
+                    self.adopt(t)
+                } else {
+                    session.terminate()
                 }
-                if let path = FinderBridge.frontmostFolder() { self.session.cd(to: path) }
             }
         }
     }
 
-    /// Finder applies AX position/size writes asynchronously; reading straight
-    /// back returns the old frame. Poll briefly until the frame changes.
-    private func devLog(_ s: String) {
-        let line = s + "\n"
-        let url = URL(fileURLWithPath: "/tmp/ft-dock.log")
-        if let h = try? FileHandle(forWritingTo: url) {
-            h.seekToEndOfFile()
-            h.write(line.data(using: .utf8)!)
-            try? h.close()
-        } else {
-            try? line.write(to: url, atomically: true, encoding: .utf8)
+    private func adopt(_ t: DockedTerminal) {
+        terminals[t.windowID] = t
+        t.onFinished = { [weak self] finished in
+            self?.terminals.removeValue(forKey: finished.windowID)
         }
-    }
-
-    private func settledFrame(after previous: CGRect) -> CGRect? {
-        let deadline = Date().addingTimeInterval(0.15)
-        while Date() < deadline {
-            if let f = tracker.currentFrame(), f != previous { return f }
-            usleep(20_000)
-        }
-        return tracker.currentFrame()
-    }
-
-    /// Attach to the frontmost Finder window, shrink it, and show the terminal
-    /// in the freed space. Returns false if there is no usable window.
-    private func dockToCurrentWindow() -> Bool {
-        let extent = { (f: CGRect) in self.side.isVertical ? f.width : f.height }
-        guard var f = tracker.attachToFrontWindow() else {
-            devLog("attachToFrontWindow -> nil")
-            return false
-        }
-        devLog("attached frame=\(f)")
-
-        // A small window is still the user's window — grow it toward the dock
-        // side to make room rather than opening a new one. The remainder after
-        // shrinking must stay above Finder's own minimum window size (~300),
-        // or the shrink gets clamped and docking fails.
-        let neededExtent = TerminalPanel.minTerminalHeight + TerminalPanel.gap + 320
-        if extent(f) < neededExtent {
-            tracker.adjust(side: side, by: neededExtent - extent(f))
-            let f2 = settledFrame(after: f) ?? f
-            devLog("grew to \(f2) needed \(neededExtent)")
-            if extent(f2) < neededExtent - 2 {
-                // Screen edge blocked the growth — undo and let the caller open
-                // a fresh window instead.
-                tracker.adjust(side: side, by: extent(f) - extent(f2))
-                return false
+        t.onWantsNewWindow = { [weak self] session in
+            // Cancel path of the post-close alert: dock the surviving session
+            // to a fresh Finder window.
+            FinderBridge.openNewWindow()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if let nt = DockedTerminal(session: session, side: AppSettings.position) {
+                    self?.adopt(nt)
+                } else {
+                    session.terminate()
+                }
             }
-            f = f2
         }
-
-        let wanted = min(TerminalPanel.defaultHeight + TerminalPanel.gap,
-                         (extent(f) * 0.45).rounded())
-        tracker.adjust(side: side, by: -wanted)
-        // Verify what actually happened — AX resizes can silently clamp or fail
-        // (was the cause of the panel covering Finder content).
-        let freed = (settledFrame(after: f).map { freedSpace(pre: f, post: $0) }) ?? 0
-        if freed >= TerminalPanel.minTerminalHeight + TerminalPanel.gap {
-            shrunkBy = freed
-            terminalHeight = freed - TerminalPanel.gap
-            redockOrShow(show: true)
-            tracker.startObserving()
-            reassertOrder()
-            return true
-        }
-        if freed > 0 { tracker.adjust(side: side, by: freed) }   // undo partial shrink
-        return false
+        refillSpare()
     }
 
-    private func closeTerminal() {
-        terminalOpen = false
-        termState.isOpen = false
-        stopFollowing()
-        panel.hide()
-        tracker.stopObserving()
-        if shrunkBy > 0 {
-            tracker.adjust(side: side, by: shrunkBy) // give the space back to Finder
-            shrunkBy = 0
+    private func takeSpareSession() -> TerminalSession {
+        let s = spareSession ?? TerminalSession()
+        spareSession = nil
+        s.startIfNeeded(dir: FinderBridge.frontmostFolder() ?? NSHomeDirectory())
+        return s
+    }
+
+    private func refillSpare() {
+        guard spareSession == nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, self.spareSession == nil else { return }
+            let s = TerminalSession()
+            s.startIfNeeded(dir: NSHomeDirectory())
+            self.spareSession = s
         }
     }
 
-    private func redock() {
-        redockOrShow(show: false)
-    }
+    // MARK: Quake fallback (no Accessibility)
 
-    private func redockOrShow(show: Bool) {
-        guard terminalOpen || show, shrunkBy > 0, let f = tracker.currentFrame() else { return }
-        let rect = bodyRect(finder: f)
-        guard rect != lastBodyRect || show else { return }   // skip no-op frame updates
-        lastBodyRect = rect
-        if show {
-            panel.show(at: rect)
-            startFollowing()
-        } else {
-            panel.reDock(at: rect)
+    private func toggleQuake() {
+        if quakeOpen {
+            quakePanel?.hide()
+            quakeOpen = false
+            return
         }
+        let session = quakeSession ?? TerminalSession()
+        quakeSession = session
+        session.startIfNeeded(dir: FinderBridge.frontmostFolder() ?? NSHomeDirectory())
+        let panel = quakePanel ?? TerminalPanel(terminal: session.view)
+        quakePanel = panel
+        panel.applyTheme(session.applyTheme())
+        panel.show(at: TerminalPanel.quakeFrame())
+        quakeOpen = true
     }
 
-    /// AX move/resize notifications arrive in coarse bursts while dragging, which
-    /// makes notification-driven docking lag. Instead, poll the Finder frame on
-    /// every display refresh while the panel is visible — reDock is skipped when
-    /// nothing moved, so the steady-state cost is one AX read per frame.
-    private func startFollowing() {
-        guard displayLink == nil, let view = panel.contentView else { return }
-        let link = view.displayLink(target: self, selector: #selector(followTick))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
-    }
-
-    private func stopFollowing() {
-        displayLink?.invalidate()
-        displayLink = nil
-    }
-
-    @objc private func followTick() {
-        // While mouse prediction is active it owns the panel position; AX polling
-        // here would push stale frames and fight the fresher mouse data.
-        guard terminalOpen, panel.isShown, dragBase == nil else { return }
-        redock()
-    }
-
-    /// Place the panel from the live mouse position during a window drag.
-    private func predictDragPosition() {
-        guard terminalOpen, shrunkBy > 0, let base = dragBase else { return }
-        let mouse = NSEvent.mouseLocation
-        let predicted = base.finder.offsetBy(dx: mouse.x - base.mouse.x,
-                                             dy: mouse.y - base.mouse.y)
-        let rect = bodyRect(finder: predicted)
-        guard rect != lastBodyRect else { return }
-        lastBodyRect = rect
-        panel.reDock(at: rect)
-    }
+    // MARK: Global event fan-out
 
     @objc private func frontAppChanged(_ note: Notification) {
-        guard terminalOpen else { return }
-        redock()
-        reassertOrder()
-    }
-
-    /// Slot the panel directly above its Finder window in the global z-order,
-    /// so whatever covers that window covers the terminal too. Cheap; called on
-    /// window/app events rather than per frame.
-    private func reassertOrder() {
-        guard terminalOpen, shrunkBy > 0, panel.isVisible,
-              let num = tracker.windowNumber() else { return }
-        panel.order(.above, relativeTo: Int(num))
+        terminals.values.forEach {
+            $0.redock()
+            $0.reassertOrder()
+        }
     }
 
     private func promptAccessibility() {
@@ -399,7 +218,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static func settingsFingerprint() -> String {
         let d = UserDefaults.standard
-        let keys = [AppSettings.themeKey, AppSettings.positionKey, AppSettings.fontSizeKey]
+        let keys = [AppSettings.themeKey, AppSettings.positionKey, AppSettings.fontSizeKey,
+                    AppSettings.hotkeyKeyCodeKey, AppSettings.hotkeyModifiersKey]
             .map { d.string(forKey: $0) ?? String(d.double(forKey: $0)) }
         let themes = d.data(forKey: AppSettings.customThemesKey)?.hashValue ?? 0
         return keys.joined(separator: "|") + "|\(themes)"
@@ -409,12 +229,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fp = Self.settingsFingerprint()
         guard fp != lastSettingsFingerprint else { return }
         lastSettingsFingerprint = fp
-        panel.applyTheme(session.applyTheme())
-        if terminalOpen, AppSettings.position != side {
-            // Re-dock on the newly chosen side.
-            closeTerminal()
-            toggleTerminal()
+        terminals.values.forEach { $0.applyTheme() }
+        if let quakeSession, let quakePanel {
+            quakePanel.applyTheme(quakeSession.applyTheme())
         }
+        let hk = AppSettings.hotkey
+        hotkey?.register(keyCode: hk.keyCode, modifiers: hk.modifiers)
+        // Position changes apply to terminals opened from now on.
     }
 
     // Real settings window, same pattern as Imperator Dock Folders' main window.
@@ -425,13 +246,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let win = settingsWindow ?? {
-            // Initial height = just what the collapsed content needs; user can
-            // resize vertically (width is fixed — single column).
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 325),
+            // Initial height = the collapsed content incl. shortcut/alerts/position,
+            // no scrollbar; user can resize vertically (width is fixed — single column).
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 490),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
-            w.minSize = NSSize(width: 360, height: 280)
+            w.minSize = NSSize(width: 360, height: 490)
             w.maxSize = NSSize(width: 360, height: 2000)
             // Just above the floating terminal panel — settings must never end up behind it.
             w.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
@@ -440,11 +261,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         win.contentView = NSHostingView(rootView: SettingsView())
         win.title = "Imperator FinderTerminal Settings"
         win.setFrameAutosaveName("SettingsWindow")
-        if settingsWindow == nil { win.center() }
+        if settingsWindow == nil {
+            // The autosaved frame may carry an older layout's height — open at
+            // the designed size; resizes persist within the session only.
+            win.setContentSize(NSSize(width: 360, height: 490))
+            win.center()
+        }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow = win
     }
+
+    // MARK: Menu bar + popover + about
 
     // Brandbook 8.1 + 18.1: square status item, 18pt template icon, click opens popover.
     private func setupStatusItem() {
@@ -469,7 +297,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         let host = NSHostingController(rootView: PopoverContentView(
-            state: termState,
             onToggleTerminal: { [weak self] in
                 self?.popover.performClose(nil)
                 self?.toggleTerminal()
@@ -509,7 +336,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.contentViewController = NSHostingController(rootView: AboutView())
             aboutPanel = panel
         }
-        aboutPanel?.center()                          // centered on every open
+        // True screen center on every open (center() sits high, near the menu
+        // bar). Compute from the fixed content size — the live frame is not
+        // laid out yet on the first open and reads as zero.
+        if let panel = aboutPanel, let screen = NSScreen.main {
+            let f = screen.frame
+            let size = panel.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 300, height: 260)).size
+            panel.setFrame(NSRect(x: f.midX - size.width / 2, y: f.midY - size.height / 2,
+                                  width: size.width, height: size.height), display: false)
+        }
         aboutPanel?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -522,5 +357,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    // MARK: Dev verification
+
+    /// Write the frontmost terminal's rendered content + geometry state.
+    private func devSnapshot(to path: String) {
+        let t = (frontmostFinderWindowID().flatMap { terminals[$0] }) ?? terminals.values.first
+        var meta: [String: Any] = [
+            "terminalCount": terminals.count,
+            "quakeOpen": quakeOpen,
+        ]
+        if let t {
+            meta["shrunkBy"] = t.shrunkBy
+            meta["panelFrame"] = NSStringFromRect(t.panel.frame)
+            meta["panelVisible"] = t.panel.isShown
+            meta["chromeColor"] = t.panel.debugChromeColor
+            meta["font"] = "\(t.session.view.font.fontName) \(t.session.view.font.pointSize)"
+            meta["lineSpacing"] = t.session.view.lineSpacing
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) {
+            try? data.write(to: URL(fileURLWithPath: path + ".json"))
+        }
+        guard let v = t?.panel.contentView,
+              let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+        v.cacheDisplay(in: v.bounds, to: rep)
+        try? rep.representation(using: .png, properties: [:])?
+            .write(to: URL(fileURLWithPath: path + ".png"))
+    }
+}
+
+/// Append a line to the dev decision log.
+func devLog(_ s: String) {
+    let line = s + "\n"
+    let url = URL(fileURLWithPath: "/tmp/ft-dock.log")
+    if let h = try? FileHandle(forWritingTo: url) {
+        h.seekToEndOfFile()
+        h.write(line.data(using: .utf8)!)
+        try? h.close()
+    } else {
+        try? line.write(to: url, atomically: true, encoding: .utf8)
     }
 }

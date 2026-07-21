@@ -78,19 +78,10 @@ struct LaunchAtLoginToggle: View {
 
 // MARK: - Brandbook 18.3: Popover content
 
-/// Runtime state shared from AppDelegate so the popover's switch reflects
-/// whether the terminal is currently open.
-final class TerminalState: ObservableObject {
-    @Published var isOpen = false
-}
-
 struct PopoverContentView: View {
-    @ObservedObject var state: TerminalState
     let onToggleTerminal: () -> Void
     let onShowAbout: () -> Void
     let onShowSettings: () -> Void
-
-    @AppStorage(AppSettings.positionKey) private var position = DockSide.bottom.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,47 +102,11 @@ struct PopoverContentView: View {
 
             // CONTENT
             VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 8) {   // same gap as icon-to-text in the header
-                    // Switch reflecting the terminal's open state. Native mini size —
-                    // no scale/frame tricks, so it lays out and aligns correctly.
-                    Toggle("", isOn: Binding(get: { state.isOpen }, set: { _ in onToggleTerminal() }))
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .tint(AppColors.brand)
-                        .labelsHidden()
-                    HoverButton(action: onToggleTerminal) {
-                        HStack {
-                            Text("Toggle FinderTerminal")
-                                .font(.system(size: 13))
-                            Spacer()
-                            Text("⌘⌥§")
-                                .font(.system(size: 13).monospaced())
-                                .tracking(3)
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 9)
-                                .padding(.trailing, 6)   // tracking adds space after the last glyph
-                                .padding(.vertical, 5)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
-                                )
-                        }
-                        .expandTapTarget()
-                    }
-                    .cursor(.pointingHand)
-                }
+                ShortcutSettings()
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("POSITION")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    // One row, four equal-width radio choices.
-                    HStack(spacing: 0) {
-                        ForEach(DockSide.allCases) { s in
-                            positionRadio(s)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
+                    sectionHeader("POSITION")
+                    PositionRadios()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -186,16 +141,128 @@ struct PopoverContentView: View {
         .background(Color.black.opacity(0.15))
     }
 
-    private func positionRadio(_ s: DockSide) -> some View {
-        let selected = position == s.rawValue
-        return Button {
-            position = s.rawValue
-        } label: {
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+    }
+}
+
+// MARK: - Shared settings controls (popover + Settings window)
+
+/// Current shortcut row (read-only badge) + "Change Keyboard Shortcut" recorder.
+struct ShortcutSettings: View {
+    @AppStorage(AppSettings.hotkeyKeyCodeKey) private var hotkeyCode = 10
+    @AppStorage(AppSettings.hotkeyModifiersKey) private var hotkeyMods = 256 | 2048
+    @State private var isRecording = false
+    @State private var recordMonitor: Any?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Keyboard Shortcut")
+                    .font(.system(size: 13))
+                Spacer()
+                shortcutBadge(isRecording
+                              ? "Type shortcut…"
+                              : Hotkey.display(keyCode: UInt32(hotkeyCode),
+                                               modifiers: UInt32(hotkeyMods)))
+            }
+
+            // Record a new one: click, then press the combo (Esc cancels).
+            HoverButton(action: { isRecording ? stopRecording() : startRecording() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "square.and.pencil")
+                    Text(isRecording ? "Press keys… (Esc to cancel)" : "Change Keyboard Shortcut")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(isRecording ? AppColors.brand : Color.primary)
+                .expandTapTarget()
+            }
+            .cursor(.pointingHand)
+        }
+        // The host may close mid-recording — release the key monitor, or it
+        // keeps swallowing every keyDown in the app.
+        .onDisappear { stopRecording() }
+    }
+
+    private func shortcutBadge(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13).monospaced())
+            .tracking(text.count <= 4 ? 3 : 0)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 9)
+            .padding(.trailing, 6)
+            .padding(.vertical, 5)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(Color.secondary.opacity(0.4), lineWidth: 0.5)
+            )
+    }
+
+    private func startRecording() {
+        isRecording = true
+        recordMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 {              // Escape cancels
+                stopRecording()
+                return nil
+            }
+            let mods = Hotkey.carbonModifiers(from: event.modifierFlags)
+            guard mods != 0 else { return nil }   // require at least one modifier
+            hotkeyCode = Int(event.keyCode)
+            hotkeyMods = Int(mods)
+            stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        isRecording = false
+        if let m = recordMonitor { NSEvent.removeMonitor(m) }
+        recordMonitor = nil
+    }
+}
+
+/// Warn on window close: always, or only with a live process.
+struct AlertsRadios: View {
+    @AppStorage(AppSettings.alertModeKey) private var alertMode = "always"
+
+    var body: some View {
+        HStack(spacing: 0) {
+            RadioButton(label: "Always on", selected: alertMode == "always") { alertMode = "always" }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            RadioButton(label: "Only running processes", selected: alertMode == "busy") { alertMode = "busy" }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// One row, four equal-width dock-side choices.
+struct PositionRadios: View {
+    @AppStorage(AppSettings.positionKey) private var position = DockSide.bottom.rawValue
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(DockSide.allCases) { s in
+                RadioButton(label: s.label, selected: position == s.rawValue) { position = s.rawValue }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+struct RadioButton: View {
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
             HStack(spacing: 4) {
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 11))
                     .foregroundStyle(selected ? AppColors.brand : Color.secondary)
-                Text(s.label)
+                Text(label)
                     .font(.system(size: 11))
             }
             .expandTapTarget()
