@@ -220,6 +220,16 @@ final class TerminalPanel: NSPanel {
 
     var isShown: Bool { isVisible && alphaValue > 0.01 }
 
+    /// Overlay mode = the Finder window sits in a fullscreen space. Such a space
+    /// only shows windows that opt in, and a `.normal` window never draws above
+    /// a fullscreen one — so join all spaces and float. Outside fullscreen both
+    /// would put the panel over unrelated apps, so it stays `.normal` there.
+    func setOverlay(_ on: Bool) {
+        collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.fullScreenAuxiliary]
+        level = on ? .floating : .normal
+    }
+
+
     /// `rect` is the visible body; the window adds the transparent gap strip on
     /// the Finder-facing side.
     private func windowFrame(forBody rect: CGRect) -> CGRect {
@@ -257,10 +267,13 @@ final class TerminalPanel: NSPanel {
         })
     }
 
-    /// Follow the Finder window while visible (no animation).
+    /// Follow the Finder window (no animation). Applies while hidden too, so a
+    /// panel that sat out a space switch comes back in the right place.
+    /// `display: false` — the window server composites the new frame either way,
+    /// and forcing a synchronous display pass per mouse event is what makes a
+    /// follow feel heavy.
     func reDock(at rect: CGRect) {
-        guard isShown else { return }
-        setFrame(windowFrame(forBody: rect), display: true)
+        setFrame(windowFrame(forBody: rect), display: false)
     }
 
     static func quakeFrame() -> CGRect {

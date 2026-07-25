@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupPopover()
         promptAccessibility()
+        // A crash could have left a fullscreen space insetting its window.
+        SpaceReservation.clearStaleFinderReservations()
 
         // Live-apply settings changes (theme colors, font size, hotkey).
         NotificationCenter.default.addObserver(
@@ -41,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(frontAppChanged(_:)),
             name: NSWorkspace.didActivateApplicationNotification, object: nil)
+
+        // Swiping between spaces must not drag a fullscreen terminal along.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(spaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
         // Mouse-riding drag follow + z-order upkeep, fanned out to every terminal.
         mouseMonitors = [
@@ -75,7 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         devRemote = DevRemote(
             onToggle: { [weak self] in self?.toggleTerminal() },
             onSnapshot: { [weak self] path in self?.devSnapshot(to: path) },
-            onExec: { [weak self] cmd in self?.frontTerminalSession()?.view.send(txt: cmd + "\r") }
+            onExec: { [weak self] cmd in self?.frontTerminalSession()?.view.send(txt: cmd + "\r") },
+            onProbe: { [weak self] cmd in self?.devProbe(cmd) }
         )
 
         refillSpare()
@@ -212,6 +220,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func spaceChanged() {
+        terminals.values.forEach { $0.spaceChanged() }
+    }
+
     private func promptAccessibility() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
@@ -238,7 +250,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let hk = AppSettings.hotkey
         hotkey?.register(keyCode: hk.keyCode, modifiers: hk.modifiers)
-        // Position changes apply to terminals opened from now on.
+        // Position applies to every open terminal, not just the next one.
+        let side = AppSettings.position
+        terminals.values.forEach { $0.changeSide(to: side) }
     }
 
     // Real settings window, same pattern as Imperator Dock Folders' main window.
@@ -363,6 +377,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: Dev verification
+
+    /// Dev: "state" logs the frontmost Finder window; "fs"/"nofs" flips its
+    /// fullscreen state (headless green button) so docking can be verified
+    /// without keyboard access.
+    private func devProbe(_ cmd: String) {
+        let t = WindowTracker()
+        guard t.attachToFrontWindow() != nil else { devLog("probe: no window"); return }
+        switch cmd {
+        case "fs": devLog("probe: fs accepted=\(t.setFullScreen(true))")
+        case "nofs": devLog("probe: nofs accepted=\(t.setFullScreen(false))")
+        case let c where c.hasPrefix("pos "):
+            // Same write the popover radios do, so the live-apply path is exercised.
+            UserDefaults.standard.set(String(c.dropFirst(4)), forKey: AppSettings.positionKey)
+            devLog("probe: position -> \(AppSettings.position.rawValue)")
+        case let c where c.hasPrefix("drag "):
+            // Replay a splitter drag: N events of the given per-event delta.
+            let parts = c.split(separator: " ")
+            let delta = CGFloat(Double(parts.count > 1 ? parts[1] : "8") ?? 8)
+            let count = Int(parts.count > 2 ? parts[2] : "10") ?? 10
+            guard let terminal = frontmostFinderWindowID().flatMap({ terminals[$0] })
+                    ?? terminals.values.first else { devLog("probe: no terminal"); return }
+            for _ in 0..<count { terminal.devSplitterDrag(delta) }
+            devLog("probe: dragged \(count)x\(delta) -> fullScreen=\(t.isFullScreen) "
+                   + "frame=\(t.currentFrame().map(NSStringFromRect) ?? "nil")")
+        default:
+            devLog("probe: fullScreen=\(t.isFullScreen) frame=\(t.currentFrame().map(NSStringFromRect) ?? "nil") "
+                   + "winNum=\(t.windowNumber().map(String.init) ?? "nil") terminals=\(terminals.count)")
+        }
+    }
 
     /// Write the frontmost terminal's rendered content + geometry state.
     private func devSnapshot(to path: String) {

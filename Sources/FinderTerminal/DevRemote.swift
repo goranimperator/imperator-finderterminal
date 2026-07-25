@@ -8,13 +8,17 @@ final class DevRemote {
     private let onToggle: () -> Void
     private let onSnapshot: (String) -> Void
     private let onExec: (String) -> Void
+    private let onProbe: (String) -> Void
 
     init(onToggle: @escaping () -> Void, onSnapshot: @escaping (String) -> Void,
-         onExec: @escaping (String) -> Void) {
+         onExec: @escaping (String) -> Void, onProbe: @escaping (String) -> Void) {
         self.onToggle = onToggle
         self.onSnapshot = onSnapshot
         self.onExec = onExec
+        self.onProbe = onProbe
         let c = DistributedNotificationCenter.default()
+        c.addObserver(self, selector: #selector(probe),
+                      name: .init("com.goranimperator.ImperatorFinderTerminal.probe"), object: nil)
         c.addObserver(self, selector: #selector(toggle),
                       name: .init("com.goranimperator.ImperatorFinderTerminal.toggle"), object: nil)
         c.addObserver(self, selector: #selector(snapshot(_:)),
@@ -42,5 +46,10 @@ final class DevRemote {
     @objc private func snapshot(_ note: Notification) {
         let path = (note.object as? String) ?? "/tmp/ft-snapshot"
         DispatchQueue.main.async { self.onSnapshot(path) }
+    }
+
+    @objc private func probe(_ note: Notification) {
+        let cmd = (note.object as? String) ?? "state"
+        DispatchQueue.main.async { self.onProbe(cmd) }
     }
 }

@@ -23,9 +23,13 @@ final class WindowTracker {
     /// which Finder also reports (it spans the whole screen and must never be docked to).
     private static func isStandardWindow(_ w: AXUIElement) -> Bool {
         var subrole: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(w, kAXSubroleAttribute as CFString, &subrole) == .success,
-              let s = subrole as? String else { return false }
-        return s == (kAXStandardWindowSubrole as String)
+        if AXUIElementCopyAttributeValue(w, kAXSubroleAttribute as CFString, &subrole) == .success,
+           let s = subrole as? String, s == (kAXStandardWindowSubrole as String) { return true }
+        // A fullscreen window is a real window whatever subrole it reports; the
+        // desktop never carries the fullscreen attribute.
+        var full: CFTypeRef?
+        return AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &full) == .success
+            && (full as? Bool) == true
     }
 
     /// Grab the frontmost Finder window as the tracked window. Returns its Cocoa frame.
@@ -49,6 +53,33 @@ final class WindowTracker {
         return currentFrame()
     }
 
+    /// Re-attach to a specific window by its CGWindowID. Used when a fullscreen
+    /// transition replaces the AX element of a window that is still very much
+    /// alive. Returns its Cocoa frame.
+    @discardableResult
+    func attach(windowID: CGWindowID) -> CGRect? {
+        stopObserving()
+        window = nil
+        guard let pid = Self.finderPID() else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        var wins: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &wins) == .success,
+              let candidates = wins as? [AXUIElement] else { return nil }
+        for candidate in candidates where Self.isStandardWindow(candidate) {
+            window = candidate
+            if windowNumber() == windowID { return currentFrame() }
+        }
+        window = nil
+        return nil
+    }
+
+    /// Is this window still known to the window server (any space)?
+    static func exists(windowID: CGWindowID) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID)
+                as? [[String: Any]] else { return false }
+        return list.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == windowID }
+    }
+
     /// Raw AX frame: top-left origin, same coordinate space as CGWindowList.
     private func rawFrame() -> CGRect? {
         guard let w = window else { return nil }
@@ -69,6 +100,17 @@ final class WindowTracker {
         rawFrame().map(Self.axToCocoa)
     }
 
+    /// True while the window owns a fullscreen space. Such a window cannot be
+    /// resized through AX — the space fixes its frame — so the terminal has to
+    /// overlay it instead of docking beside it.
+    var isFullScreen: Bool {
+        guard let w = window else { return false }
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(w, "AXFullScreen" as CFString, &v) == .success
+        else { return false }
+        return (v as? Bool) ?? false
+    }
+
     /// Finder applies AX position/size writes asynchronously; reading straight
     /// back returns the old frame. Poll briefly until the frame changes.
     func settledFrame(after previous: CGRect) -> CGRect? {
@@ -84,8 +126,15 @@ final class WindowTracker {
     /// against Finder's on-screen windows. Used to slot the terminal panel
     /// directly above its Finder window in the global z-order.
     func windowNumber() -> CGWindowID? {
+        // On-screen first (cheapest, unambiguous). A window in a fullscreen space
+        // that is not the space being shown is absent from that list, so fall
+        // back to every window before giving up.
+        windowNumber(options: [.optionOnScreenOnly]) ?? windowNumber(options: [.optionAll])
+    }
+
+    private func windowNumber(options: CGWindowListOption) -> CGWindowID? {
         guard let pid = Self.finderPID(), let raw = rawFrame(),
-              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+              let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
                 as? [[String: Any]] else { return nil }
         for info in list {
             guard let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
@@ -127,6 +176,14 @@ final class WindowTracker {
         if let sv = AXValueCreate(.cgSize, &s) {
             AXUIElementSetAttributeValue(w, kAXSizeAttribute as CFString, sv)
         }
+    }
+
+    /// Enter or leave the native fullscreen space. Returns false when the write
+    /// was rejected.
+    @discardableResult
+    func setFullScreen(_ on: Bool) -> Bool {
+        guard let w = window else { return false }
+        return AXUIElementSetAttributeValue(w, "AXFullScreen" as CFString, on as CFTypeRef) == .success
     }
 
     /// Press the tracked window's close button (AX) — closes the Finder window

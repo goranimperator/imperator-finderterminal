@@ -12,13 +12,30 @@ final class DockedTerminal {
 
     private(set) var shrunkBy: CGFloat = 0
     private var terminalHeight: CGFloat = 0
-    private let side: DockSide
+    private var side: DockSide
     private var lastBodyRect = CGRect.zero
     private var displayLink: CADisplayLink?
     private var dragBase: (finder: CGRect, mouse: CGPoint)?
     /// Snapshot taken at mouseDown, before anything moves — the only moment
     /// the window frame and mouse position pair exactly.
     private var pendingDragAnchor: (finder: CGRect, mouse: CGPoint)?
+    /// A poll for the new fullscreen space is in flight.
+    private var adoptingFullScreen = false
+    /// The user is dragging the splitter (or the outer edge) right now.
+    private var splitterDragging = false
+    /// When the last AX geometry notification arrived — gates the follow poll.
+    private var lastGeometryEvent = Date.distantPast
+    /// Drag deltas waiting for the next display tick.
+    private var pendingSplitter: CGFloat = 0
+    private var pendingOuter: CGFloat = 0
+    /// Dock geometry from before the window went fullscreen: the frame macOS
+    /// restores on the way out still has this shrink applied.
+    private var preFullScreenShrink: CGFloat = 0
+    private var preFullScreenHeight: CGFloat = 0
+    /// Fullscreen space we reserved a strip in. A fullscreen space drops every
+    /// AX resize, so room is freed by insetting the space's layout instead —
+    /// the window stays in its real fullscreen space, just smaller.
+    private var reservedSpace: UInt64?
     /// Set while the Cmd-W flow already handled termination — suppresses the
     /// post-close alert when the AX destroyed notification arrives.
     private var suppressCloseAlert = false
@@ -29,18 +46,253 @@ final class DockedTerminal {
     var onWantsNewWindow: ((TerminalSession) -> Void)?
 
     /// Docks to the frontmost Finder window. Fails (nil) if there is no usable
-    /// window or the AX shrink freed nothing.
+    /// window or no room could be freed.
     init?(session: TerminalSession, side: DockSide) {
         self.session = session
         self.side = side
         self.panel = TerminalPanel(terminal: session.view)
         panel.side = side
 
-        let extent = { (f: CGRect) in side.isVertical ? f.width : f.height }
-        guard WindowTracker.isTrusted, var f = tracker.attachToFrontWindow() else { return nil }
+        guard WindowTracker.isTrusted, let f0 = tracker.attachToFrontWindow() else { return nil }
         // Resolve the CGWindowID BEFORE resizing: CGWindowList bounds lag behind
         // AX writes, so a post-shrink lookup mismatches and fails.
         guard let id = tracker.windowNumber() else { return nil }
+        windowID = id
+
+        if let space = SpaceReservation.fullScreenSpace(of: id) {
+            guard reserveStrip(TerminalPanel.defaultHeight, in: space, from: f0) else { return nil }
+        } else {
+            guard let freed = Self.makeRoom(tracker: tracker, side: side, from: f0) else { return nil }
+            shrunkBy = freed
+            terminalHeight = (freed - TerminalPanel.gap).rounded()
+        }
+        panel.setOverlay(reservedSpace != nil)
+
+        panel.applyTheme(session.applyTheme())
+        let folder = FinderBridge.frontmostFolder() ?? NSHomeDirectory()
+        session.startIfNeeded(dir: folder)
+        session.cd(to: folder)
+
+        wireCallbacks()
+        if let frame = tracker.currentFrame() {
+            panel.show(at: bodyRect(finder: frame))
+            lastBodyRect = bodyRect(finder: frame)
+        }
+        tracker.startObserving()
+        reassertOrder()
+        startFollowing()
+    }
+
+    private func wireCallbacks() {
+        tracker.onGeometryChange = { [weak self] in
+            guard let self else { return }
+            self.lastGeometryEvent = Date()
+            self.wake()
+            // Fullscreen transitions arrive as resizes.
+            if self.tracker.isFullScreen {
+                self.adoptFullScreenSpace()
+            } else if self.reservedSpace != nil {
+                self.leftFullScreenSpace()
+            }
+            // A splitter drag moves the window through us, not the other way
+            // round: prediction there would fight our own resize.
+            if self.splitterDragging {
+                self.dragBase = nil
+            } else if NSEvent.pressedMouseButtons & 1 != 0, let f = self.tracker.currentFrame() {
+                if let base = self.dragBase {
+                    // Size change = a resize, not a move: prediction would
+                    // misplace the panel — fall back to display-link polling.
+                    if base.finder.size != f.size { self.dragBase = nil }
+                } else {
+                    // A drag is confirmed (the window actually moved). Anchor
+                    // on the exact mouseDown pairing when we have it; the AX
+                    // frame here is a frame stale against the fresh mouse and
+                    // would bake in a constant offset.
+                    self.dragBase = self.pendingDragAnchor ?? (f, NSEvent.mouseLocation)
+                }
+            } else {
+                self.dragBase = nil
+            }
+            self.redock()
+            // reassertOrder enumerates every on-screen window; doing that per
+            // notification during a drag is the expensive part. The mouse-up
+            // handler re-asserts once the drag ends.
+            if NSEvent.pressedMouseButtons & 1 == 0 { self.reassertOrder() }
+        }
+        tracker.onFolderChange = { [weak self] in
+            guard let self, let path = FinderBridge.frontmostFolder() else { return }
+            self.session.cd(to: path)
+        }
+        tracker.onWindowClosed = { [weak self] in
+            self?.windowWasClosed()
+        }
+        // cd in this shell steers Finder's front window (the common case: the
+        // user is typing in the terminal whose window is active).
+        session.onDirChangeFromShell = { path in
+            FinderBridge.navigate(to: path)
+        }
+        // Drags only accumulate here; the display tick applies them. A resize per
+        // mouse event means an AX (or space) write per event, which Finder cannot
+        // keep up with — the deltas pile into visible lag.
+        panel.onResizeDrag = { [weak self] delta in
+            guard let self, self.shrunkBy > 0 else { return }
+            self.splitterDragging = true
+            self.pendingSplitter += delta
+            self.wake()
+        }
+        panel.onBottomResizeDrag = { [weak self] delta in
+            guard let self, self.shrunkBy > 0 else { return }
+            self.splitterDragging = true
+            self.pendingOuter += delta
+            self.wake()
+        }
+    }
+
+    /// Splitter edge: trade extent with the Finder window (or with the reserved
+    /// strip when it is fullscreen).
+    private func applySplitter(_ delta: CGFloat) {
+        guard shrunkBy > 0, let f = tracker.currentFrame() else { return }
+        let finderExtent = side.isVertical ? f.width : f.height
+        let clamped = max(TerminalPanel.minTerminalHeight - terminalHeight,
+                          min(delta, finderExtent - 300))
+        // Whole points only: fractional geometry leaves a blurred seam between
+        // the two windows (and collapses a fullscreen space outright). Carry the
+        // sub-point remainder to the next tick so slow drags still track.
+        let step = (terminalHeight + clamped).rounded() - terminalHeight
+        guard abs(step) >= 1 else { pendingSplitter += clamped; return }
+        if let space = reservedSpace {
+            reserveStrip(terminalHeight + step, in: space, from: f, live: true)
+        } else {
+            tracker.adjust(side: side, by: -step)
+            shrunkBy += step
+            terminalHeight += step
+            redock()
+        }
+    }
+
+    /// Outer edge: the terminal's own size. In a fullscreen space that edge is
+    /// the screen edge, so the strip has to change instead (mirrored).
+    private func applyOuter(_ delta: CGFloat) {
+        guard shrunkBy > 0 else { return }
+        if let space = reservedSpace, let f = tracker.currentFrame() {
+            let wanted = max(TerminalPanel.minTerminalHeight, terminalHeight - delta).rounded()
+            guard abs(wanted - terminalHeight) >= 1 else { pendingOuter += delta; return }
+            reserveStrip(wanted, in: space, from: f, live: true)
+            return
+        }
+        let wanted = max(TerminalPanel.minTerminalHeight, terminalHeight + delta).rounded()
+        guard abs(wanted - terminalHeight) >= 1 else { pendingOuter += delta; return }
+        terminalHeight = wanted
+        redock()
+    }
+
+    /// Apply whatever the drag accumulated since the last tick.
+    private func flushPendingDrag() -> Bool {
+        guard pendingSplitter != 0 || pendingOuter != 0 else { return false }
+        let splitter = pendingSplitter, outer = pendingOuter
+        pendingSplitter = 0
+        pendingOuter = 0
+        if splitter != 0 { applySplitter(splitter) }
+        if outer != 0 { applyOuter(outer) }
+        return true
+    }
+
+    /// Inset the fullscreen space's layout by `height` + gap, so its window is
+    /// laid out short of the docked edge and the terminal fits in the strip.
+    /// `live` = called from a drag: no frame-settle poll and no logging, both of
+    /// which would stall the main thread on every mouse event.
+    @discardableResult
+    private func reserveStrip(_ height: CGFloat, in space: UInt64, from f: CGRect,
+                              live: Bool = false) -> Bool {
+        // Whole points only: a fractional reservation makes the window server
+        // tear the fullscreen space down (measured — trackpad deltas are
+        // fractional, which is why only real drags hit it).
+        let strip = (height + TerminalPanel.gap).rounded()
+        guard SpaceReservation.reserve(strip, side: side, space: space) else {
+            devLog("reserveStrip: space \(space) refused \(strip)pt")
+            return false
+        }
+        reservedSpace = space
+        terminalHeight = strip - TerminalPanel.gap
+        shrunkBy = strip
+        if !live {
+            let got = tracker.settledFrame(after: f) ?? f
+            devLog("reserveStrip: \(strip)pt in space \(space) -> window \(NSStringFromRect(got))")
+        }
+        lastBodyRect = .zero
+        redock()
+        return true
+    }
+
+    /// The user pushed the window into a fullscreen space while docked: reserve a
+    /// strip in the new space instead of the AX shrink. The space does not exist
+    /// yet when the resize notification lands, so poll for it.
+    private func adoptFullScreenSpace(attemptsLeft: Int = 8) {
+        guard reservedSpace == nil, !adoptingFullScreen || attemptsLeft < 8 else { return }
+        guard let space = SpaceReservation.fullScreenSpace(of: windowID) else {
+            guard attemptsLeft > 0, tracker.isFullScreen else {
+                adoptingFullScreen = false
+                if attemptsLeft <= 0 { devLog("fullscreen space never appeared for \(windowID)") }
+                return
+            }
+            adoptingFullScreen = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                self?.adoptFullScreenSpace(attemptsLeft: attemptsLeft - 1)
+            }
+            return
+        }
+        adoptingFullScreen = false
+        // macOS restores the pre-fullscreen frame later, and that frame still
+        // carries our shrink — remember it so leaving fullscreen doesn't shrink
+        // the window a second time.
+        preFullScreenShrink = shrunkBy
+        preFullScreenHeight = terminalHeight
+        shrunkBy = 0
+        guard let f = tracker.currentFrame() else { return }
+        devLog("window went fullscreen -> reserving strip in space \(space)")
+        panel.setOverlay(true)
+        // A whole screen of room: never carry over a height the old small window
+        // forced on us.
+        _ = reserveStrip(max(terminalHeight, TerminalPanel.defaultHeight), in: space, from: f)
+        settlePanelAcrossTransition()   // the panel has to join the fullscreen space
+        startFollowing()                // display links pause while off-space
+    }
+
+    /// The window left its fullscreen space: the reservation died with it, so
+    /// free room the normal way — unless the restored frame already carries the
+    /// shrink from before it went fullscreen.
+    private func leftFullScreenSpace() {
+        devLog("leftFullScreenSpace: splitterDragging=\(splitterDragging) height=\(terminalHeight)")
+        reservedSpace = nil
+        panel.setOverlay(false)
+        if preFullScreenShrink > 0 {
+            shrunkBy = preFullScreenShrink
+            terminalHeight = preFullScreenHeight
+            devLog("window left fullscreen -> resuming previous dock (\(shrunkBy))")
+        } else if let f = tracker.currentFrame(),
+                  let freed = Self.makeRoom(tracker: tracker, side: side, from: f) {
+            shrunkBy = freed
+            terminalHeight = (freed - TerminalPanel.gap).rounded()
+            devLog("window left fullscreen -> docked (freed \(freed))")
+        } else {
+            shrunkBy = 0
+            devLog("window left fullscreen -> could not free room")
+            return
+        }
+        preFullScreenShrink = 0
+        lastBodyRect = .zero
+        redock()
+        settlePanelAcrossTransition()   // back in a normal space: the panel must return
+        startFollowing()
+    }
+
+    // MARK: Geometry
+
+    /// Shrink the Finder window along `side` to free space for the terminal.
+    /// Returns the space actually freed, or nil when the window won't give it up.
+    private static func makeRoom(tracker: WindowTracker, side: DockSide, from f0: CGRect) -> CGFloat? {
+        let extent = { (f: CGRect) in side.isVertical ? f.width : f.height }
+        var f = f0
 
         // A small window is still the user's window — grow it toward the dock
         // side to make room rather than giving up. The remainder after shrinking
@@ -61,83 +313,13 @@ final class DockedTerminal {
                          (extent(f) * 0.45).rounded())
         tracker.adjust(side: side, by: -wanted)
         // Verify what actually happened — AX resizes can silently clamp or fail.
-        let freed = (tracker.settledFrame(after: f).map { Self.freedSpace(side: side, pre: f, post: $0) }) ?? 0
+        let freed = (tracker.settledFrame(after: f).map { freedSpace(side: side, pre: f, post: $0) }) ?? 0
         guard freed >= TerminalPanel.minTerminalHeight + TerminalPanel.gap else {
             if freed > 0 { tracker.adjust(side: side, by: freed) }
             return nil
         }
-
-        windowID = id
-        shrunkBy = freed
-        terminalHeight = freed - TerminalPanel.gap
-
-        panel.applyTheme(session.applyTheme())
-        let folder = FinderBridge.frontmostFolder() ?? NSHomeDirectory()
-        session.startIfNeeded(dir: folder)
-        session.cd(to: folder)
-
-        wireCallbacks()
-        if let frame = tracker.currentFrame() {
-            panel.show(at: bodyRect(finder: frame))
-            lastBodyRect = bodyRect(finder: frame)
-        }
-        tracker.startObserving()
-        reassertOrder()
-        startFollowing()
+        return freed
     }
-
-    private func wireCallbacks() {
-        tracker.onGeometryChange = { [weak self] in
-            guard let self else { return }
-            if NSEvent.pressedMouseButtons & 1 != 0, let f = self.tracker.currentFrame() {
-                if let base = self.dragBase {
-                    // Size change = a resize, not a move: prediction would
-                    // misplace the panel — fall back to display-link polling.
-                    if base.finder.size != f.size { self.dragBase = nil }
-                } else {
-                    // A drag is confirmed (the window actually moved). Anchor
-                    // on the exact mouseDown pairing when we have it; the AX
-                    // frame here is a frame stale against the fresh mouse and
-                    // would bake in a constant offset.
-                    self.dragBase = self.pendingDragAnchor ?? (f, NSEvent.mouseLocation)
-                }
-            } else {
-                self.dragBase = nil
-            }
-            self.redock()
-            self.reassertOrder()
-        }
-        tracker.onFolderChange = { [weak self] in
-            guard let self, let path = FinderBridge.frontmostFolder() else { return }
-            self.session.cd(to: path)
-        }
-        tracker.onWindowClosed = { [weak self] in
-            self?.windowWasClosed()
-        }
-        // cd in this shell steers Finder's front window (the common case: the
-        // user is typing in the terminal whose window is active).
-        session.onDirChangeFromShell = { path in
-            FinderBridge.navigate(to: path)
-        }
-        panel.onResizeDrag = { [weak self] delta in
-            guard let self, self.shrunkBy > 0, let f = self.tracker.currentFrame() else { return }
-            let finderExtent = self.side.isVertical ? f.width : f.height
-            let maxGrow = finderExtent - 300
-            let diff = max(TerminalPanel.minTerminalHeight - self.terminalHeight, min(delta, maxGrow))
-            guard abs(diff) > 0.5 else { return }
-            self.tracker.adjust(side: self.side, by: -diff)
-            self.shrunkBy += diff
-            self.terminalHeight += diff
-            self.redock()
-        }
-        panel.onBottomResizeDrag = { [weak self] delta in
-            guard let self, self.shrunkBy > 0 else { return }
-            self.terminalHeight = max(TerminalPanel.minTerminalHeight, self.terminalHeight + delta)
-            self.redock()
-        }
-    }
-
-    // MARK: Geometry
 
     private static func freedSpace(side: DockSide, pre f: CGRect, post f2: CGRect) -> CGFloat {
         switch side {
@@ -184,6 +366,39 @@ final class DockedTerminal {
             return
         }
         pendingDragAnchor = (f, NSEvent.mouseLocation)
+        wake()
+    }
+
+    /// The active space changed: show the panel only while its Finder window is
+    /// on the space we're looking at.
+    func spaceChanged() {
+        if Self.isOnActiveSpace(windowID) {
+            if !panel.isVisible { panel.orderFront(nil) }
+            lastBodyRect = .zero            // re-place from scratch after a switch
+            wake()
+            redock()
+            reassertOrder()
+        } else if panel.isVisible {
+            panel.orderOut(nil)
+        }
+    }
+
+    /// A space transition takes ~1s, and the window is missing from the on-screen
+    /// list while it runs — one `spaceChanged()` mid-flight would leave the panel
+    /// hidden, so settle it over the whole transition.
+    private func settlePanelAcrossTransition() {
+        for delay in [0.3, 0.9, 1.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.spaceChanged()
+            }
+        }
+    }
+
+    /// Windows on other spaces are absent from the on-screen window list.
+    private static func isOnActiveSpace(_ id: CGWindowID) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+                as? [[String: Any]] else { return true }
+        return list.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == id }
     }
 
     /// Mouse-riding drag prediction (fed from the global drag monitor).
@@ -201,20 +416,53 @@ final class DockedTerminal {
     func settleDrag() {
         dragBase = nil
         pendingDragAnchor = nil
+        if splitterDragging {
+            splitterDragging = false
+            _ = flushPendingDrag()          // whatever the last tick missed
+            if let space = reservedSpace, let f = tracker.currentFrame() {
+                // Re-assert the final strip and let the frame settle now that the
+                // per-event work is over.
+                reserveStrip(terminalHeight, in: space, from: f)
+            }
+        }
         redock()
         reassertOrder()
     }
 
     private func startFollowing() {
-        guard displayLink == nil, let view = panel.contentView else { return }
+        // A display link pauses when its view's window leaves the active space
+        // and does not always resume — rebuild it after a space round trip.
+        displayLink?.invalidate()
+        displayLink = nil
+        guard let view = panel.contentView else { return }
         let link = view.displayLink(target: self, selector: #selector(followTick))
         link.add(to: .main, forMode: .common)
+        link.isPaused = true
         displayLink = link
     }
 
     @objc private func followTick() {
-        guard panel.isShown, dragBase == nil else { return }
+        guard panel.isShown else { displayLink?.isPaused = true; return }
+        // Self-heal: a mouse-up we never saw (space switch, lost event) must not
+        // leave the drag flag set — that would kill the follow prediction.
+        if splitterDragging, NSEvent.pressedMouseButtons & 1 == 0 { splitterDragging = false }
+        if flushPendingDrag() { return }
+        guard dragBase == nil else { return }
+        // Each poll costs two AX round trips into Finder. Idle windows are the
+        // normal case, so stop the link entirely and let `wake()` restart it —
+        // a geometry notification or a mouse-down always precedes real motion.
+        let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
+        let recentMotion = Date().timeIntervalSince(lastGeometryEvent) < 0.5
+        guard buttonDown || recentMotion else {
+            displayLink?.isPaused = true
+            return
+        }
         redock()
+    }
+
+    /// Resume the follow poll: something is about to move.
+    private func wake() {
+        displayLink?.isPaused = false
     }
 
     // MARK: Closing
@@ -234,17 +482,27 @@ final class DockedTerminal {
     private func close() {
         teardown()
         panel.hide()
-        if shrunkBy > 0 {
-            tracker.adjust(side: side, by: shrunkBy)
-            shrunkBy = 0
-        }
+        restoreWindow()
         session.terminate()
         onFinished?(self)
     }
 
     /// App quitting: restore Finder geometry only.
     func restoreOnQuit() {
-        if shrunkBy > 0 { tracker.adjust(side: side, by: shrunkBy) }
+        restoreWindow()
+    }
+
+    /// Hand the window back exactly as we found it — its own size, and its
+    /// fullscreen space when it had one.
+    private func restoreWindow() {
+        let freed = shrunkBy
+        shrunkBy = 0
+        if let space = reservedSpace {
+            SpaceReservation.clear(space: space)   // the space gets its full layout back
+            reservedSpace = nil
+        } else if freed > 0 {
+            tracker.adjust(side: side, by: freed)
+        }
     }
 
     func applyTheme() {
@@ -253,6 +511,64 @@ final class DockedTerminal {
 
     /// True when something beyond the idle shell is running here.
     var isBusy: Bool { !session.runningProcessNames().isEmpty }
+
+    /// Move the terminal to another edge of the same window, live: hand the old
+    /// edge back, take the new one. Works in a fullscreen space too (the strip is
+    /// re-reserved on the new edge). Reverts if the new edge cannot make room.
+    func changeSide(to newSide: DockSide) {
+        guard newSide != side, shrunkBy > 0 else { return }
+        let previous = side
+        let height = terminalHeight
+        let space = reservedSpace
+
+        // Give the old edge back before claiming the new one, or the window ends
+        // up short on both.
+        if let space {
+            SpaceReservation.clear(space: space)
+            reservedSpace = nil
+        } else {
+            tracker.adjust(side: previous, by: shrunkBy)
+            if let f = tracker.currentFrame() { _ = tracker.settledFrame(after: f) }
+        }
+        shrunkBy = 0
+        side = newSide
+        panel.side = newSide
+
+        var ok = false
+        if let space, let f = tracker.currentFrame() {
+            ok = reserveStrip(height, in: space, from: f)
+        } else if let f = tracker.currentFrame(),
+                  let freed = Self.makeRoom(tracker: tracker, side: newSide, from: f) {
+            shrunkBy = freed
+            terminalHeight = (freed - TerminalPanel.gap).rounded()
+            ok = true
+        }
+        guard ok else {
+            devLog("changeSide: \(newSide.rawValue) made no room -> reverting")
+            side = previous
+            panel.side = previous
+            if let space, let f = tracker.currentFrame() {
+                _ = reserveStrip(height, in: space, from: f)
+            } else if let f = tracker.currentFrame(),
+                      let freed = Self.makeRoom(tracker: tracker, side: previous, from: f) {
+                shrunkBy = freed
+                terminalHeight = (freed - TerminalPanel.gap).rounded()
+            }
+            lastBodyRect = .zero
+            redock()
+            return
+        }
+        lastBodyRect = .zero
+        redock()
+        reassertOrder()
+        wake()
+    }
+
+    /// Dev: drive the splitter without a mouse.
+    func devSplitterDrag(_ delta: CGFloat) {
+        panel.onResizeDrag?(delta)
+        _ = flushPendingDrag()      // the display tick would do this
+    }
 
     /// Cmd-W flow already resolved this terminal (terminated or kept):
     /// the upcoming AX destroyed notification must not alert again.
@@ -271,8 +587,23 @@ final class DockedTerminal {
         tracker.stopObserving()
     }
 
-    /// The Finder window disappeared (red button, or Cmd-W we let through).
+    /// The Finder window disappeared (red button, or Cmd-W we let through) — or
+    /// a fullscreen transition just swapped its AX element while the window
+    /// itself lives on.
     private func windowWasClosed() {
+        if WindowTracker.exists(windowID: windowID), tracker.attach(windowID: windowID) != nil {
+            devLog("stale destroy notification -> re-attached to \(windowID)")
+            tracker.startObserving()
+            if tracker.isFullScreen {
+                adoptFullScreenSpace()
+            } else if reservedSpace != nil {
+                leftFullScreenSpace()
+            } else {
+                redock()
+                reassertOrder()
+            }
+            return
+        }
         shrunkBy = 0
         teardown()
 
