@@ -81,15 +81,15 @@ struct SettingsView: View {
 
                 Divider()
 
-                staticSection("Alerts") {
-                    AlertsRadios()
+                staticSection("Focus on open") {
+                    FocusRadios()
                         .frame(maxWidth: 340)
                 }
 
                 Divider()
 
-                staticSection("Focus on open") {
-                    FocusRadios()
+                staticSection("Alerts on close") {
+                    AlertsRadios()
                         .frame(maxWidth: 340)
                 }
             }
