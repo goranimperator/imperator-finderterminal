@@ -290,27 +290,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let win = settingsWindow ?? {
-            // Initial height = the collapsed content incl. shortcut/alerts/position,
-            // no scrollbar; user can resize vertically (width is fixed — single column).
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 545),
+            // Height is set from the content's measured height (see below); this
+            // is only the size before the first layout pass. Width is fixed —
+            // single column.
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 400),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
-            w.minSize = NSSize(width: 360, height: 545)
+            w.minSize = NSSize(width: 360, height: 260)
             w.maxSize = NSSize(width: 360, height: 2000)
             // Just above the floating terminal panel — settings must never end up behind it.
             w.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
             return w
         }()
-        win.contentView = NSHostingView(rootView: SettingsView())
+        // Fit the window to the content instead of a hand-tuned constant: no
+        // wasted space below the last row, and no scrollbar until the accordions
+        // grow past the screen.
+        win.contentView = NSHostingView(rootView: SettingsView { [weak win] height in
+            guard let win else { return }
+            let limit = (win.screen ?? NSScreen.main)?.visibleFrame.height ?? 900
+            let wanted = min(height.rounded(), limit - 40)
+            guard abs(win.contentLayoutRect.height - wanted) > 1 else { return }
+            let topLeft = NSPoint(x: win.frame.minX, y: win.frame.maxY)
+            win.setContentSize(NSSize(width: 360, height: wanted))
+            win.setFrameTopLeftPoint(topLeft)
+        })
         win.title = "Imperator FinderTerminal Settings"
         win.setFrameAutosaveName("SettingsWindow")
-        if settingsWindow == nil {
-            // The autosaved frame may carry an older layout's height — open at
-            // the designed size; resizes persist within the session only.
-            win.setContentSize(NSSize(width: 360, height: 545))
-            win.center()
-        }
+        // The content callback sets the height; only the position is ours.
+        if settingsWindow == nil { win.center() }
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow = win

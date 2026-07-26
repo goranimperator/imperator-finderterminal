@@ -4,6 +4,11 @@ import SwiftUI
 /// Collapsible sections follow brandbook 7.4: button-based accordion headers with
 /// a rotating chevron, 11pt semibold uppercase labels.
 struct SettingsView: View {
+    /// Reports the content's natural height so the window can size itself to it
+    /// exactly — no guessed constant to update every time a row is added, and no
+    /// scrollbar until the accordions expand past the screen.
+    var onContentHeight: (CGFloat) -> Void = { _ in }
+
     @AppStorage(AppSettings.themeKey) private var themeSelection = ThemeSelection.profile.storageValue
     @AppStorage(AppSettings.fontSizeKey) private var fontSize = 0.0
     @State private var customThemes = AppSettings.customThemes
@@ -47,6 +52,11 @@ struct SettingsView: View {
 
                 Divider()
 
+                ShortcutSettings()
+                    .frame(maxWidth: 340)
+
+                Divider()
+
                 staticSection("Font Size") {
                     HStack(spacing: 8) {
                         SettingsSlider(value: $fontSize, range: 0...24, step: 1)
@@ -63,9 +73,11 @@ struct SettingsView: View {
 
                 Divider()
 
-                // Same controls as the popover, same order.
-                ShortcutSettings()
-                    .frame(maxWidth: 340)
+                // Position is independent of theme: it applies no matter what.
+                staticSection("Position") {
+                    PositionRadios()
+                        .frame(maxWidth: 340)
+                }
 
                 Divider()
 
@@ -80,20 +92,18 @@ struct SettingsView: View {
                     FocusRadios()
                         .frame(maxWidth: 340)
                 }
-
-                Divider()
-
-                // Position is independent of theme: it applies no matter what.
-                staticSection("Position") {
-                    PositionRadios()
-                        .frame(maxWidth: 340)
-                }
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(GeometryReader { geo in
+                Color.clear.preference(key: ContentHeightKey.self, value: geo.size.height)
+            })
         }
         .frame(minWidth: 360, minHeight: 260)
         .tint(AppColors.brand)
+        .onPreferenceChange(ContentHeightKey.self) { height in
+            if height > 0 { onContentHeight(height) }
+        }
         .onChange(of: customThemes) { _, newValue in
             AppSettings.customThemes = newValue
         }
@@ -310,5 +320,13 @@ private struct ThemeRowButton: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .cursor(.pointingHand)
+    }
+}
+
+/// Carries the settings content's natural height out to the window.
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
