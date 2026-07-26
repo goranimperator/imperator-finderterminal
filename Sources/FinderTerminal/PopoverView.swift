@@ -245,7 +245,7 @@ struct FocusRadios: View {
         HStack(spacing: 0) {
             RadioButton(label: "Terminal", selected: focus != "finder") { focus = "terminal" }
                 .frame(maxWidth: .infinity, alignment: .leading)
-            RadioButton(label: "Finder window", selected: focus == "finder") { focus = "finder" }
+            RadioButton(label: "Finder", selected: focus == "finder") { focus = "finder" }
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
