@@ -25,9 +25,10 @@ enum FinderBridge {
         return out
     }
 
-    /// Open a fresh Finder window on the home folder, sized generously (Finder's
-    /// default window is too small to shrink for docking) and bring Finder forward.
-    static func openNewWindow() {
+    /// Open a fresh Finder window, sized generously (Finder's default window is
+    /// too small to shrink for docking) and bring Finder forward. `folder` keeps
+    /// a replacement window on the directory the user was in; nil = home.
+    static func openNewWindow(at folder: String? = nil) {
         let screen = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         let fullHeight = NSScreen.main?.frame.height ?? screen.maxY
         let w = (screen.width * 0.5).rounded()
@@ -35,10 +36,17 @@ enum FinderBridge {
         let x = (screen.minX + (screen.width - w) / 2).rounded()
         let cocoaY = (screen.minY + (screen.height - h) / 2).rounded()
         let top = (fullHeight - (cocoaY + h)).rounded()   // AppleScript bounds are top-left based
+        // Fall back to home if the folder is gone (deleted, unmounted).
+        let target = folder.map { "(POSIX file \"\(PathUtil.appleScriptQuote($0))\" as alias)" }
+            ?? "(path to home folder)"
         let src = """
         tell application "Finder"
             activate
-            set w to make new Finder window to (path to home folder)
+            try
+                set w to make new Finder window to \(target)
+            on error
+                set w to make new Finder window to (path to home folder)
+            end try
             set bounds of w to {\(Int(x)), \(Int(top)), \(Int(x + w)), \(Int(top + h))}
         end tell
         """

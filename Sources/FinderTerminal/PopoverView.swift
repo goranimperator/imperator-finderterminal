@@ -237,6 +237,20 @@ struct AlertsRadios: View {
     }
 }
 
+/// Who has the keyboard when the terminal opens.
+struct FocusRadios: View {
+    @AppStorage(AppSettings.focusKey) private var focus = "terminal"
+
+    var body: some View {
+        HStack(spacing: 0) {
+            RadioButton(label: "Terminal", selected: focus != "finder") { focus = "terminal" }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            RadioButton(label: "Finder window", selected: focus == "finder") { focus = "finder" }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 /// One row, four equal-width dock-side choices.
 struct PositionRadios: View {
     @AppStorage(AppSettings.positionKey) private var position = DockSide.bottom.rawValue

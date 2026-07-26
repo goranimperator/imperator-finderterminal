@@ -116,6 +116,13 @@ enum AppSettings {
     static let hotkeyKeyCodeKey = "ft.hotkeyKeyCode"
     static let hotkeyModifiersKey = "ft.hotkeyModifiers"
     static let alertModeKey = "ft.alertMode"
+    static let focusKey = "ft.focus"
+
+    /// True (default) = the terminal takes keyboard focus when it opens;
+    /// false ("finder") = Finder keeps focus and the terminal just appears.
+    static var focusTerminalOnOpen: Bool {
+        UserDefaults.standard.string(forKey: focusKey) != "finder"
+    }
 
     /// True (default) = warn on every close of a window with a terminal;
     /// false ("busy") = warn only when a process is running.

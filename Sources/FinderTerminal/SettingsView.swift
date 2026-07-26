@@ -76,6 +76,13 @@ struct SettingsView: View {
 
                 Divider()
 
+                staticSection("Focus on open") {
+                    FocusRadios()
+                        .frame(maxWidth: 340)
+                }
+
+                Divider()
+
                 // Position is independent of theme: it applies no matter what.
                 staticSection("Position") {
                     PositionRadios()

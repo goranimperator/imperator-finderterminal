@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover!
     private var eventMonitor: Any?
     private var hotkey: Hotkey?
-    private var keyTap: KeyTap?
+    private var closeGuard: CloseGuard?
     private var mouseMonitors: [Any] = []
     private var devRemote: DevRemote?
     private var settingsWindow: NSWindow?
@@ -64,20 +64,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkey = Hotkey { [weak self] in self?.toggleTerminal() }
 
-        // Intercept Cmd-W before Finder closes a window that has a busy terminal,
-        // so the warning can veto the close (red button can't be intercepted).
-        let tap = KeyTap()
+        // Catch every close route before Finder acts on it, so the warning can
+        // veto the close and the window survives a Cancel.
+        let tap = CloseGuard()
         tap.onCmdW = { [weak self] in
-            // confirmCloseFromKeyboard handles both busy (ask) and idle (close
-            // immediately). Two focus cases: Finder frontmost (its front window
-            // has a terminal), or our own terminal panel focused — the panel
-            // steals key focus on open, so Cmd-W usually lands here.
+            // confirmClose handles both busy (ask) and idle (close immediately).
+            // Two focus cases: Finder frontmost (its front window has a
+            // terminal), or our own terminal panel focused — the panel steals
+            // key focus on open, so Cmd-W usually lands here.
             guard let self, let t = self.cmdWTarget() else { return false }
             // Defer the alert flow out of event-tap processing.
-            DispatchQueue.main.async { t.confirmCloseFromKeyboard() }
+            DispatchQueue.main.async { t.confirmClose() }
             return true
         }
-        keyTap = tap
+        tap.onCloseButtonClick = { [weak self] point in
+            // A click on the red button of a guarded window: swallow it so the
+            // window stays put, and ask instead.
+            guard let self,
+                  let t = self.terminals.values.first(where: { $0.ownsCloseButton(at: point) })
+            else { return false }
+            DispatchQueue.main.async { t.confirmClose() }
+            return true
+        }
+        tap.onMinimizeStart = { [weak self] point in
+            guard let self else { return }
+            // A click carries a location to hit-test; Cmd-M applies to whichever
+            // Finder window is focused.
+            if point != nil {
+                for t in self.terminals.values {
+                    if t.minimizeStarting(at: point) { break }
+                }
+            } else if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder",
+                      let id = self.frontmostFinderWindowID(), let t = self.terminals[id] {
+                _ = t.minimizeStarting(at: nil)
+            }
+        }
+        closeGuard = tap
 
         devRemote = DevRemote(
             onToggle: { [weak self] in self?.toggleTerminal() },
@@ -90,7 +112,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Give the windows their space back AND kill every shell we spawned —
+        // otherwise quitting leaves orphaned login shells behind for good.
         terminals.values.forEach { $0.restoreOnQuit() }
+        terminals.values.forEach { $0.session.terminate() }
+        spareSession?.terminate()
+        quakeSession?.terminate()
     }
 
     // MARK: Toggle / open
@@ -161,10 +188,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         t.onFinished = { [weak self] finished in
             self?.terminals.removeValue(forKey: finished.windowID)
         }
-        t.onWantsNewWindow = { [weak self] session in
-            // Cancel path of the post-close alert: dock the surviving session
-            // to a fresh Finder window.
-            FinderBridge.openNewWindow()
+        t.onWantsNewWindow = { [weak self] session, folder in
+            // Cancel path of the post-close alert: dock the surviving session to
+            // a fresh Finder window, on the folder it was showing.
+            FinderBridge.openNewWindow(at: folder)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 if let nt = DockedTerminal(session: session, side: AppSettings.position) {
                     self?.adopt(nt)
@@ -265,11 +292,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let win = settingsWindow ?? {
             // Initial height = the collapsed content incl. shortcut/alerts/position,
             // no scrollbar; user can resize vertically (width is fixed — single column).
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 490),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 545),
                              styleMask: [.titled, .closable, .resizable, .miniaturizable],
                              backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
-            w.minSize = NSSize(width: 360, height: 490)
+            w.minSize = NSSize(width: 360, height: 545)
             w.maxSize = NSSize(width: 360, height: 2000)
             // Just above the floating terminal panel — settings must never end up behind it.
             w.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
@@ -281,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             // The autosaved frame may carry an older layout's height — open at
             // the designed size; resizes persist within the session only.
-            win.setContentSize(NSSize(width: 360, height: 490))
+            win.setContentSize(NSSize(width: 360, height: 545))
             win.center()
         }
         win.makeKeyAndOrderFront(nil)
@@ -387,6 +414,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch cmd {
         case "fs": devLog("probe: fs accepted=\(t.setFullScreen(true))")
         case "nofs": devLog("probe: nofs accepted=\(t.setFullScreen(false))")
+        case let c where c.hasPrefix("alert "):
+            // Answer the sheet as the user would, to verify both outcomes.
+            guard let terminal = frontmostFinderWindowID().flatMap({ terminals[$0] })
+                    ?? terminals.values.first,
+                  let sheet = terminal.panel.attachedSheet else { devLog("probe: no sheet"); return }
+            let terminate = c.hasSuffix("terminate")
+            devLog("probe: answering sheet -> \(terminate ? "Terminate" : "Cancel")")
+            terminal.panel.endSheet(sheet,
+                returnCode: terminate ? .alertFirstButtonReturn : .alertSecondButtonReturn)
+        case "closebtn":
+            // Log the close-button rect and click it, to exercise the guard.
+            devLog("probe: closeButton=\(t.closeButtonFrame().map(NSStringFromRect) ?? "nil")")
+            guard let rect = t.closeButtonFrame() else { return }
+            let source = CGEventSource(stateID: .hidSystemState)
+            let mid = CGPoint(x: rect.midX, y: rect.midY)
+            for kind in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+                CGEvent(mouseEventSource: source, mouseType: kind,
+                        mouseCursorPosition: mid, mouseButton: .left)?.post(tap: .cghidEventTap)
+            }
         case let c where c.hasPrefix("pos "):
             // Same write the popover radios do, so the live-apply path is exercised.
             UserDefaults.standard.set(String(c.dropFirst(4)), forKey: AppSettings.positionKey)
@@ -421,6 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             meta["chromeColor"] = t.panel.debugChromeColor
             meta["font"] = "\(t.session.view.font.fontName) \(t.session.view.font.pointSize)"
             meta["lineSpacing"] = t.session.view.lineSpacing
+            meta["sheetUp"] = t.panel.attachedSheet != nil
         }
         if let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path + ".json"))

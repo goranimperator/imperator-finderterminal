@@ -11,6 +11,7 @@ final class WindowTracker {
     var onGeometryChange: (() -> Void)?   // moved / resized
     var onFolderChange: (() -> Void)?     // title changed ~= navigated
     var onWindowClosed: (() -> Void)?     // window destroyed
+    var onVisibilityChange: (() -> Void)? // minimised / restored
 
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
@@ -186,6 +187,41 @@ final class WindowTracker {
         return AXUIElementSetAttributeValue(w, "AXFullScreen" as CFString, on as CFTypeRef) == .success
     }
 
+    /// True while the window sits in the Dock. Its frame is meaningless then,
+    /// and the terminal must go with it.
+    var isMinimized: Bool {
+        guard let w = window else { return false }
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &v) == .success
+        else { return false }
+        return (v as? Bool) ?? false
+    }
+
+    /// The close button's rect in AX space (top-left origin) — the same space
+    /// CGEvent reports mouse locations in, so a click can be hit-tested directly.
+    func closeButtonFrame() -> CGRect? { buttonFrame(kAXCloseButtonAttribute) }
+
+    /// Same, for the yellow minimise button.
+    func minimizeButtonFrame() -> CGRect? { buttonFrame(kAXMinimizeButtonAttribute) }
+
+    private func buttonFrame(_ attribute: String) -> CGRect? {
+        guard let w = window else { return nil }
+        var btn: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(w, attribute as CFString, &btn) == .success,
+              let button = btn else { return nil }
+        let element = button as! AXUIElement
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success
+        else { return nil }
+        var p = CGPoint.zero
+        var s = CGSize.zero
+        AXValueGetValue(posRef as! AXValue, .cgPoint, &p)
+        AXValueGetValue(sizeRef as! AXValue, .cgSize, &s)
+        return CGRect(origin: p, size: s)
+    }
+
     /// Press the tracked window's close button (AX) — closes the Finder window
     /// exactly like clicking the red button.
     func pressCloseButton() {
@@ -208,6 +244,7 @@ final class WindowTracker {
     private static let notes = [
         kAXMovedNotification, kAXResizedNotification,
         kAXTitleChangedNotification, kAXUIElementDestroyedNotification,
+        kAXWindowMiniaturizedNotification, kAXWindowDeminiaturizedNotification,
     ]
 
     func startObserving() {
@@ -221,6 +258,8 @@ final class WindowTracker {
                 switch note {
                 case kAXTitleChangedNotification: me.onFolderChange?()
                 case kAXUIElementDestroyedNotification: me.onWindowClosed?()
+                case kAXWindowMiniaturizedNotification,
+                     kAXWindowDeminiaturizedNotification: me.onVisibilityChange?()
                 default: me.onGeometryChange?()
                 }
             }

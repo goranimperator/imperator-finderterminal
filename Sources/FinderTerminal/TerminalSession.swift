@@ -18,6 +18,12 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     /// Called when the user `cd`s inside the shell. Receives a normalized path.
     var onDirChangeFromShell: ((String) -> Void)?
 
+    /// A `cd` we sent that the shell has not echoed back yet. The pre-spawned
+    /// shell's first prompt still reports its spawn directory, and propagating
+    /// that would drag Finder to the wrong folder for a moment. Bounded in time
+    /// so a shell that never confirms cannot disable the reverse sync.
+    private var awaiting: (dir: String, sentAt: Date)?
+
     override init() {
         view = LocalProcessTerminalView(frame: .zero)
         super.init()
@@ -62,6 +68,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     func cd(to rawPath: String) {
         guard started, let path = PathUtil.normalize(rawPath), path != currentDir else { return }
         currentDir = path
+        awaiting = (path, Date())
         // Ctrl-U clears any half-typed line first so we don't corrupt the user's input.
         view.send(txt: "\u{15}cd \(PathUtil.shellQuote(path))\r")
     }
@@ -86,6 +93,7 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
         if pid > 0 { kill(-pid, SIGHUP) }
         started = false
         currentDir = nil
+        awaiting = nil
     }
 
     private static func run(_ path: String, _ args: [String]) -> String {
@@ -102,7 +110,14 @@ final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate {
     // MARK: LocalProcessTerminalViewDelegate
 
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        guard let dir = directory, let path = PathUtil.normalize(dir), path != currentDir else { return }
+        guard let dir = directory, let path = PathUtil.normalize(dir) else { return }
+        if let awaiting, Date().timeIntervalSince(awaiting.sentAt) < 2 {
+            // Still catching up with our own cd: this prompt is stale.
+            if path == awaiting.dir { self.awaiting = nil }
+            return
+        }
+        awaiting = nil
+        guard path != currentDir else { return }
         currentDir = path
         onDirChangeFromShell?(path)
     }

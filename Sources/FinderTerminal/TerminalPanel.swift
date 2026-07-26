@@ -242,15 +242,45 @@ final class TerminalPanel: NSPanel {
         }
     }
 
-    func show(at rect: CGRect) {
+    /// `takeFocus` false leaves Finder in charge: the panel appears but keyboard
+    /// focus stays where it was (Settings ▸ Focus).
+    func show(at rect: CGRect, takeFocus: Bool = true) {
         setFrame(windowFrame(forBody: rect), display: false)
         layoutContent()
         alphaValue = 0
-        makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        makeFirstResponder(terminal)
+        if takeFocus {
+            makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            makeFirstResponder(terminal)
+        } else {
+            orderFront(nil)
+        }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.12
+            ctx.duration = Self.fadeDuration
+            animator().alphaValue = 1
+        }
+    }
+
+    /// One fade for every way the panel leaves or returns — same duration, same
+    /// default easing — so it always reads as one gesture and its reverse.
+    private static let fadeDuration: TimeInterval = 0.22
+
+    func fadeOut() {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.fadeDuration
+            animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self, self.alphaValue < 0.01 else { return }
+            self.orderOut(nil)
+        })
+    }
+
+    /// Come back with the window instead of popping in.
+    func fadeIn() {
+        alphaValue = 0
+        orderFront(nil)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.fadeDuration
             animator().alphaValue = 1
         }
     }
@@ -259,12 +289,7 @@ final class TerminalPanel: NSPanel {
         // A sheet on a hidden panel would linger invisibly; .stop matches no
         // alert button, so pending completions become no-ops.
         if let sheet = attachedSheet { endSheet(sheet, returnCode: .stop) }
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.1
-            animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            self?.orderOut(nil)
-        })
+        fadeOut()
     }
 
     /// Follow the Finder window (no animation). Applies while hidden too, so a

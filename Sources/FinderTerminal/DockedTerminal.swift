@@ -42,8 +42,9 @@ final class DockedTerminal {
 
     /// Called when this terminal is done (window closed + resolved, or terminated).
     var onFinished: ((DockedTerminal) -> Void)?
-    /// Cancel path of the post-close alert: give this session a new window.
-    var onWantsNewWindow: ((TerminalSession) -> Void)?
+    /// Cancel path of the post-close alert: give this session a new window, on
+    /// the folder it was showing.
+    var onWantsNewWindow: ((TerminalSession, String?) -> Void)?
 
     /// Docks to the frontmost Finder window. Fails (nil) if there is no usable
     /// window or no room could be freed.
@@ -75,7 +76,7 @@ final class DockedTerminal {
 
         wireCallbacks()
         if let frame = tracker.currentFrame() {
-            panel.show(at: bodyRect(finder: frame))
+            panel.show(at: bodyRect(finder: frame), takeFocus: AppSettings.focusTerminalOnOpen)
             lastBodyRect = bodyRect(finder: frame)
         }
         tracker.startObserving()
@@ -125,6 +126,9 @@ final class DockedTerminal {
         }
         tracker.onWindowClosed = { [weak self] in
             self?.windowWasClosed()
+        }
+        tracker.onVisibilityChange = { [weak self] in
+            self?.updatePanelVisibility()
         }
         // cd in this shell steers Finder's front window (the common case: the
         // user is typing in the terminal whose window is active).
@@ -369,18 +373,21 @@ final class DockedTerminal {
         wake()
     }
 
-    /// The active space changed: show the panel only while its Finder window is
-    /// on the space we're looking at.
-    func spaceChanged() {
-        if Self.isOnActiveSpace(windowID) {
-            if !panel.isVisible { panel.orderFront(nil) }
-            lastBodyRect = .zero            // re-place from scratch after a switch
-            wake()
-            redock()
-            reassertOrder()
-        } else if panel.isVisible {
-            panel.orderOut(nil)
+    /// The active space changed.
+    func spaceChanged() { updatePanelVisibility() }
+
+    /// The terminal is only on screen when its Finder window is: not minimised,
+    /// and on the space we are looking at.
+    func updatePanelVisibility() {
+        guard !tracker.isMinimized, Self.isOnActiveSpace(windowID) else {
+            if panel.isVisible { panel.orderOut(nil) }
+            return
         }
+        if !panel.isVisible || panel.alphaValue < 0.99 { panel.fadeIn() }
+        lastBodyRect = .zero            // re-place from scratch after a switch
+        wake()
+        redock()
+        reassertOrder()
     }
 
     /// A space transition takes ~1s, and the window is missing from the on-screen
@@ -576,10 +583,37 @@ final class DockedTerminal {
         suppressCloseAlert = true
     }
 
-    /// Close our Finder window via AX (used by the Cmd-W Terminate path).
+    /// Close our Finder window via AX (used by the Terminate paths).
     func closeFinderWindow() {
         tracker.pressCloseButton()
     }
+
+    /// True when `point` (AX/CGEvent space) is on this window's close button.
+    func ownsCloseButton(at point: CGPoint) -> Bool {
+        guard let rect = tracker.closeButtonFrame() else { return false }
+        return rect.contains(point)
+    }
+
+    /// A minimise just started (yellow button clicked at `point`, or Cmd-M with
+    /// this window focused): fade out alongside the Dock animation instead of
+    /// waiting for the AX notification, which only lands once it has finished.
+    func minimizeStarting(at point: CGPoint?) -> Bool {
+        guard panel.isShown, !tracker.isMinimized else { return false }
+        if let point {
+            guard tracker.minimizeButtonFrame()?.contains(point) == true else { return false }
+        }
+        panel.fadeOut()
+        // The window server decides on mouse-up: a press that drags away, or a
+        // Cmd-M the window ignored, never minimises. Put the panel back then.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self, !self.tracker.isMinimized, self.shrunkBy > 0 else { return }
+            self.updatePanelVisibility()
+        }
+        return true
+    }
+
+    /// Folder the shell is in — where a replacement window should open.
+    var currentFolder: String? { session.currentDir }
 
     private func teardown() {
         displayLink?.invalidate()
@@ -631,22 +665,24 @@ final class DockedTerminal {
                 // Cancel: keep the session alive, re-dock it to a new window.
                 self.panel.hide()
                 let session = self.session
+                let folder = self.currentFolder
                 self.onFinished?(self)
-                self.onWantsNewWindow?(session)
+                self.onWantsNewWindow?(session, folder)
             default:
                 break   // superseded (.stop) — a newer alert owns the decision
             }
         }
     }
 
-    /// Cmd-W was intercepted BEFORE the window closed: ask first — always, or
-    /// only while a process runs, per the ALERTS setting.
-    func confirmCloseFromKeyboard() {
+    /// A close was intercepted BEFORE Finder acted on it (Cmd-W or the red
+    /// button): ask first — always, or only while a process runs, per the ALERTS
+    /// setting. Cancel leaves the window exactly as it was.
+    func confirmClose() {
         if !AppSettings.alertAlways && !isBusy {
             markResolvedBeforeClose()
-            session.terminate()
             panel.hide()
             closeFinderWindow()
+            session.terminate()
             return
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -654,9 +690,11 @@ final class DockedTerminal {
         presentTerminateAlert { [weak self] response in
             guard let self, response == .alertFirstButtonReturn else { return }   // Cancel: window stays open
             self.markResolvedBeforeClose()
-            self.session.terminate()
+            // Fade first: Finder's close animation then runs alongside it rather
+            // than the panel vanishing once the window is already gone.
             self.panel.hide()
             self.closeFinderWindow()
+            self.session.terminate()
         }
     }
 
