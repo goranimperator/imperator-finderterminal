@@ -130,6 +130,12 @@ final class DockedTerminal {
         tracker.onVisibilityChange = { [weak self] in
             self?.updatePanelVisibility()
         }
+        // Clicking the panel raises only the panel; bring its window along.
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            self?.raiseWithWindow()
+        }
         // cd in this shell steers Finder's front window (the common case: the
         // user is typing in the terminal whose window is active).
         session.onDirChangeFromShell = { path in
@@ -351,6 +357,21 @@ final class DockedTerminal {
         guard rect != lastBodyRect else { return }
         lastBodyRect = rect
         panel.reDock(at: rect)
+    }
+
+    /// The terminal was clicked or our app came forward. macOS raises only the
+    /// window that was hit, so the Finder window has to be raised too — they are
+    /// one unit visually but two separate windows to the window server (there is
+    /// no cross-app grouping: SLSSetWindowParent accepts the call and no-ops).
+    func raiseWithWindow() {
+        guard shrunkBy > 0, panel.isShown, !tracker.isMinimized else { return }
+        // An AX raise lifts the window as high as it goes without activating
+        // Finder: just under the active app's windows. We are the active app
+        // here, so that lands it directly beneath the panel — no z-order pinning
+        // needed, and pinning would in fact drag the panel back down to whatever
+        // level Finder happened to sit at.
+        tracker.raise()
+        panel.orderFrontRegardless()
     }
 
     /// Slot the panel directly above its Finder window in the global z-order.

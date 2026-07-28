@@ -222,6 +222,14 @@ final class WindowTracker {
         return CGRect(origin: p, size: s)
     }
 
+    /// Raise the tracked window in the global window order without activating
+    /// Finder. Used to keep the pair together when the terminal is clicked: the
+    /// window server has no cross-app grouping, so both have to be raised.
+    func raise() {
+        guard let w = window else { return }
+        AXUIElementPerformAction(w, kAXRaiseAction as CFString)
+    }
+
     /// Press the tracked window's close button (AX) — closes the Finder window
     /// exactly like clicking the red button.
     func pressCloseButton() {

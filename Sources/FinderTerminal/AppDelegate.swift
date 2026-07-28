@@ -49,6 +49,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(spaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
+        // Coming forward must lift the Finder window with us, not just the panel.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appBecameActive),
+            name: NSApplication.didBecomeActiveNotification, object: nil)
+
         // Mouse-riding drag follow + z-order upkeep, fanned out to every terminal.
         mouseMonitors = [
             NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown], handler: { [weak self] _ in
@@ -241,10 +246,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Global event fan-out
 
     @objc private func frontAppChanged(_ note: Notification) {
-        terminals.values.forEach {
-            $0.redock()
-            $0.reassertOrder()
+        // The window that was clicked rises asynchronously; a single re-assert
+        // can land before it has, which pins the panel *below* whatever was on
+        // top. Repeat across the transition.
+        terminals.values.forEach { $0.redock() }
+        for delay in [0.0, 0.1, 0.3] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.terminals.values.forEach { $0.reassertOrder() }
+            }
         }
+    }
+
+    @objc private func appBecameActive() {
+        guard let panel = NSApp.keyWindow as? TerminalPanel,
+              let t = terminals.values.first(where: { $0.panel === panel }) else { return }
+        t.raiseWithWindow()
     }
 
     @objc private func spaceChanged() {
