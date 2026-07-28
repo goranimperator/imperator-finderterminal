@@ -212,6 +212,27 @@ final class TerminalPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    /// An accessory app has no menu bar, so nothing matches the standard editing
+    /// key equivalents and Cmd-C/V never reach the terminal. Route them here.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods == .command, let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let action: Selector? = switch key {
+        case "c": #selector(NSText.copy(_:))
+        case "v": #selector(NSText.paste(_:))
+        case "x": #selector(NSText.cut(_:))
+        case "a": #selector(NSText.selectAll(_:))
+        default: nil
+        }
+        guard let action, terminal.responds(to: action) else {
+            return super.performKeyEquivalent(with: event)
+        }
+        terminal.perform(action, with: self)
+        return true
+    }
+
     /// Never let AppKit nudge the panel back on-screen — it must sit exactly in
     /// the gap beside the Finder window, even partially off-screen near the Dock.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {

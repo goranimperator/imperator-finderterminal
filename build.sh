@@ -16,6 +16,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/FinderTerminal"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# SwiftTerm's Metal renderer loads its shader from the SPM resource bundle, so it
+# has to travel with the app.
+for b in "$ROOT/.build/$CONF"/*_SwiftTerm.bundle; do
+    [ -d "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
+done
 
 codesign --force --sign "$IDENTITY" \
     --entitlements "$ROOT/Resources/FinderTerminal.entitlements" \

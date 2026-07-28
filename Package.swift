@@ -7,10 +7,19 @@ let package = Package(
     products: [
         .executable(name: "FinderTerminal", targets: ["FinderTerminal"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.2.0"),
-    ],
     targets: [
+        // SwiftTerm is vendored so the reverse-video fix can be applied: it sits
+        // in the library's internals and cannot be patched from outside its
+        // module. See Vendor/SwiftTerm/README.md for the patch list and how to
+        // move to a newer upstream release.
+        .target(
+            name: "SwiftTerm",
+            path: "Vendor/SwiftTerm/Sources",
+            exclude: ["Documentation.docc", "Mac/README.md"],
+            // The Metal renderer loads its shader through Bundle.module, which
+            // only exists once the target declares a resource.
+            resources: [.process("Apple/Metal/Shaders.metal")]
+        ),
         .executableTarget(
             name: "FinderTerminal",
             dependencies: ["SwiftTerm"],
