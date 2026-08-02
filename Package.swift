@@ -15,7 +15,7 @@ let package = Package(
         .target(
             name: "SwiftTerm",
             path: "Vendor/SwiftTerm/Sources",
-            exclude: ["Documentation.docc", "Mac/README.md"],
+            exclude: ["Mac/README.md"],
             // The Metal renderer loads its shader through Bundle.module, which
             // only exists once the target declares a resource.
             resources: [.process("Apple/Metal/Shaders.metal")]

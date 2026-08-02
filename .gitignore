@@ -2,3 +2,5 @@
 build/
 .DS_Store
 graphify-out/
+dist/
+.claude/settings.local.json

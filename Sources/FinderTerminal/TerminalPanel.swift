@@ -201,6 +201,7 @@ final class TerminalPanel: NSPanel {
         }
     }
 
+#if DEBUG
     /// Dev introspection: what the chrome layer actually holds.
     var debugChromeColor: String {
         guard let cg = container.layer?.backgroundColor,
@@ -208,6 +209,7 @@ final class TerminalPanel: NSPanel {
         return String(format: "#%02X%02X%02X", Int(c.redComponent * 255),
                       Int(c.greenComponent * 255), Int(c.blueComponent * 255))
     }
+#endif
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }

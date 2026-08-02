@@ -7,6 +7,10 @@ Only `Sources/SwiftTerm` is here, built as a local target from the root
 `Package.swift`. The remote SPM dependency is gone: the library needs a patch
 that cannot be applied from outside its module.
 
+`Sources/iOS` and `Sources/Documentation.docc` are deleted from the copy: this
+app is macOS-only, so the iOS views never compile and the catalogue never
+builds. Delete them again after every upstream sync.
+
 ## Local patches
 
 ### `Sources/Apple/AppleTerminalView.swift` — reverse video swaps, never inverts
@@ -38,7 +42,8 @@ Still present upstream as of `main` @ 6918d74 (2026-07-27).
 
 ## Updating
 
-1. Clone upstream at the new tag, copy `Sources/SwiftTerm` over `Sources` here.
+1. Clone upstream at the new tag, copy `Sources/SwiftTerm` over `Sources` here,
+   then delete `Sources/iOS` and `Sources/Documentation.docc` again.
 2. Re-apply every patch above (each is marked `PATCH (imperator-finder-terminal)`
    in the source — grep for it).
 3. Update the version and commit recorded at the top of this file.

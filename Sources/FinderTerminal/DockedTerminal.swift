@@ -592,11 +592,13 @@ final class DockedTerminal {
         wake()
     }
 
+#if DEBUG
     /// Dev: drive the splitter without a mouse.
     func devSplitterDrag(_ delta: CGFloat) {
         panel.onResizeDrag?(delta)
         _ = flushPendingDrag()      // the display tick would do this
     }
+#endif
 
     /// Cmd-W flow already resolved this terminal (terminated or kept):
     /// the upcoming AX destroyed notification must not alert again.

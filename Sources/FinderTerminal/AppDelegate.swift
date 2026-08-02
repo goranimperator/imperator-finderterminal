@@ -8,7 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: Hotkey?
     private var closeGuard: CloseGuard?
     private var mouseMonitors: [Any] = []
+#if DEBUG
     private var devRemote: DevRemote?
+#endif
     private var settingsWindow: NSWindow?
     private var lastSettingsFingerprint = ""
 
@@ -106,12 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         closeGuard = tap
 
+        // Debug only, deliberately: DevRemote takes commands from any process on
+        // the machine, and this app holds Accessibility, Automation and Input
+        // Monitoring grants. Shipping it would hand those grants to callers that
+        // never earned them.
+#if DEBUG
         devRemote = DevRemote(
             onToggle: { [weak self] in self?.toggleTerminal() },
             onSnapshot: { [weak self] path in self?.devSnapshot(to: path) },
             onExec: { [weak self] cmd in self?.frontTerminalSession()?.view.send(txt: cmd + "\r") },
             onProbe: { [weak self] cmd in self?.devProbe(cmd) }
         )
+#endif
 
         refillSpare()
     }
@@ -429,6 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Dev verification
 
+#if DEBUG
     /// Dev: "state" logs the frontmost Finder window; "fs"/"nofs" flips its
     /// fullscreen state (headless green button) so docking can be verified
     /// without keyboard access.
@@ -502,10 +511,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? rep.representation(using: .png, properties: [:])?
             .write(to: URL(fileURLWithPath: path + ".png"))
     }
+#endif
 }
 
-/// Append a line to the dev decision log.
+/// Append a line to the dev decision log. No-op in a release build — a shipped
+/// app has no business writing a trace of the user's folders to /tmp.
 func devLog(_ s: String) {
+#if DEBUG
     let line = s + "\n"
     let url = URL(fileURLWithPath: "/tmp/ft-dock.log")
     if let h = try? FileHandle(forWritingTo: url) {
@@ -515,4 +527,5 @@ func devLog(_ s: String) {
     } else {
         try? line.write(to: url, atomically: true, encoding: .utf8)
     }
+#endif
 }

@@ -1,5 +1,6 @@
 import AppKit
 
+#if DEBUG
 /// Headless dev control via distributed notifications (no TCC permissions needed):
 ///   ...ImperatorFinderTerminal.toggle    — same as pressing the hotkey
 ///   ...ImperatorFinderTerminal.snapshot  — writes <object>.png + <object>.json
@@ -53,3 +54,4 @@ final class DevRemote {
         DispatchQueue.main.async { self.onProbe(cmd) }
     }
 }
+#endif
