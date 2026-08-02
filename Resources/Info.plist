@@ -2,31 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Imperator FinderTerminal</string>
-    <key>CFBundleDisplayName</key>
-    <string>Imperator FinderTerminal</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.goranimperator.ImperatorFinderTerminal</string>
-    <key>CFBundleExecutable</key>
-    <string>FinderTerminal</string>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Goran Imperator. MIT License.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Imperator FinderTerminal reads and changes the folder shown in the frontmost Finder window so the terminal and Finder stay in sync.</string>
+	<key>CFBundleDisplayName</key>
+	<string>Imperator FinderTerminal</string>
+	<key>CFBundleExecutable</key>
+	<string>FinderTerminal</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.goranimperator.ImperatorFinderTerminal</string>
+	<key>CFBundleName</key>
+	<string>Imperator FinderTerminal</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>21</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Imperator FinderTerminal reads and changes the folder shown in the frontmost Finder window so the terminal and Finder stay in sync.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Goran Imperator. MIT License.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>
