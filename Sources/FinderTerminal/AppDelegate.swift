@@ -470,6 +470,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Same write the popover radios do, so the live-apply path is exercised.
             UserDefaults.standard.set(String(c.dropFirst(4)), forKey: AppSettings.positionKey)
             devLog("probe: position -> \(AppSettings.position.rawValue)")
+        case let c where c.hasPrefix("outer "):
+            // Replay an outer-edge drag: N events of the given per-event delta.
+            let parts = c.split(separator: " ")
+            let delta = CGFloat(Double(parts.count > 1 ? parts[1] : "8") ?? 8)
+            let count = Int(parts.count > 2 ? parts[2] : "10") ?? 10
+            guard let terminal = frontmostFinderWindowID().flatMap({ terminals[$0] })
+                    ?? terminals.values.first else { devLog("probe: no terminal"); return }
+            for _ in 0..<count { terminal.devOuterDrag(delta) }
+            devLog("probe: outer \(count)x\(delta)")
         case let c where c.hasPrefix("drag "):
             // Replay a splitter drag: N events of the given per-event delta.
             let parts = c.split(separator: " ")

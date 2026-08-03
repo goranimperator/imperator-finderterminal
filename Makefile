@@ -3,6 +3,8 @@ BUNDLE   = build/$(APP_NAME).app
 DIST     = dist
 ZIP      = $(DIST)/Imperator-FinderTerminal-$(VERSION).zip
 BUILD_NUMBER = $(shell git rev-list --count HEAD)
+# Optional lead sentence for the release notes, e.g. NOTES="Fixes the ... bug."
+NOTES ?=
 
 .PHONY: all release-build install clean dist release check-version
 
@@ -57,6 +59,6 @@ release: check-version
 	git push origin v$(VERSION)
 	gh release create v$(VERSION) \
 		--title "$(APP_NAME) $(VERSION)" \
-		--notes "A keyboard-triggered terminal that docks beside the frontmost real Finder window. Requires macOS 14 or later, Apple silicon; built and tested on macOS 26 only. Accessibility, Automation and Input Monitoring have to be granted in System Settings. Self-signed and not notarized, so Gatekeeper blocks the first launch: right-click the app and choose Open, or run \`xattr -dr com.apple.quarantine \"/Applications/$(APP_NAME).app\"\`." \
+		--notes "$(NOTES)A keyboard-triggered terminal that docks beside the frontmost real Finder window. Requires macOS 14 or later, Apple silicon; built and tested on macOS 26 only. Accessibility, Automation and Input Monitoring have to be granted in System Settings. Self-signed and not notarized, so Gatekeeper blocks the first launch: right-click the app and choose Open, or run \`xattr -dr com.apple.quarantine \"/Applications/$(APP_NAME).app\"\`." \
 		"$(ZIP)#$(APP_NAME) $(VERSION) (macOS)"
 	@echo "Released v$(VERSION)"
