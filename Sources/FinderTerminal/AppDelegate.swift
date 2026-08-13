@@ -285,7 +285,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func settingsFingerprint() -> String {
         let d = UserDefaults.standard
         let keys = [AppSettings.themeKey, AppSettings.positionKey, AppSettings.fontSizeKey,
-                    AppSettings.hotkeyKeyCodeKey, AppSettings.hotkeyModifiersKey]
+                    AppSettings.hotkeyKeyCodeKey, AppSettings.hotkeyModifiersKey,
+                    AppSettings.hideInMissionControlKey]
             .map { d.string(forKey: $0) ?? String(d.double(forKey: $0)) }
         let themes = d.data(forKey: AppSettings.customThemesKey)?.hashValue ?? 0
         return keys.joined(separator: "|") + "|\(themes)"
@@ -304,6 +305,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Position applies to every open terminal, not just the next one.
         let side = AppSettings.position
         terminals.values.forEach { $0.changeSide(to: side) }
+        // Mission Control visibility, likewise: live, not next-launch.
+        terminals.values.forEach { $0.panel.refreshCollectionBehavior() }
+        quakePanel?.refreshCollectionBehavior()
     }
 
     // Real settings window, same pattern as Imperator Dock Folders' main window.
@@ -338,6 +342,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let topLeft = NSPoint(x: win.frame.minX, y: win.frame.maxY)
             win.setContentSize(NSSize(width: 360, height: wanted))
             win.setFrameTopLeftPoint(topLeft)
+            devLog("settings: content=\(height.rounded()) window=\(win.contentLayoutRect.height) "
+                   + "limit=\(limit - 40) scrollbar=\(height.rounded() > wanted)")
         })
         win.title = "Imperator FinderTerminal Settings"
         win.setFrameAutosaveName("SettingsWindow")
@@ -470,6 +476,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Same write the popover radios do, so the live-apply path is exercised.
             UserDefaults.standard.set(String(c.dropFirst(4)), forKey: AppSettings.positionKey)
             devLog("probe: position -> \(AppSettings.position.rawValue)")
+        case "settings":
+            showSettings()
+        case let c where c.hasPrefix("mc "):
+            // In-process write, like the Settings toggle: an external `defaults
+            // write` does not reliably post UserDefaults.didChangeNotification.
+            UserDefaults.standard.set(c.hasSuffix("on"), forKey: AppSettings.hideInMissionControlKey)
+            devLog("probe: hideInMissionControl -> \(AppSettings.hideInMissionControl)")
         case let c where c.hasPrefix("outer "):
             // Replay an outer-edge drag: N events of the given per-event delta.
             let parts = c.split(separator: " ")
@@ -510,6 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             meta["font"] = "\(t.session.view.font.fontName) \(t.session.view.font.pointSize)"
             meta["lineSpacing"] = t.session.view.lineSpacing
             meta["sheetUp"] = t.panel.attachedSheet != nil
+            meta["collectionBehavior"] = t.panel.collectionBehavior.rawValue
         }
         if let data = try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]) {
             try? data.write(to: URL(fileURLWithPath: path + ".json"))

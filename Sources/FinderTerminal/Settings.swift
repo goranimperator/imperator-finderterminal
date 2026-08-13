@@ -117,6 +117,14 @@ enum AppSettings {
     static let hotkeyModifiersKey = "ft.hotkeyModifiers"
     static let alertModeKey = "ft.alertMode"
     static let focusKey = "ft.focus"
+    static let hideInMissionControlKey = "ft.hideInMissionControl"
+
+    /// True = keep the terminal out of the Mission Control and Exposé overview,
+    /// so only the Finder window shows there. Off by default: the terminal is a
+    /// real window and hiding it is a preference, not a fix.
+    static var hideInMissionControl: Bool {
+        UserDefaults.standard.bool(forKey: hideInMissionControlKey)
+    }
 
     /// True (default) = the terminal takes keyboard focus when it opens;
     /// false ("finder") = Finder keeps focus and the terminal just appears.

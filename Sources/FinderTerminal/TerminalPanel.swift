@@ -17,6 +17,10 @@ final class TerminalPanel: NSPanel {
     /// Which Finder edge the panel is attached to. Set before show().
     var side: DockSide = .bottom { didSet { layoutContent() } }
 
+    /// Overlay mode (the Finder window is in a fullscreen space) — remembered so
+    /// a live preference change can rebuild the collection behavior.
+    private var overlay = false
+
     static let defaultHeight: CGFloat = 300
     static let minTerminalHeight: CGFloat = 120
     /// Breathing room between the Finder window and the terminal body. The panel's
@@ -52,7 +56,7 @@ final class TerminalPanel: NSPanel {
         isFloatingPanel = false
         level = .normal
         hidesOnDeactivate = false
-        collectionBehavior = [.fullScreenAuxiliary]
+        collectionBehavior = Self.behavior(overlay: false)
         hasShadow = true
         backgroundColor = .clear
         isOpaque = false
@@ -248,8 +252,26 @@ final class TerminalPanel: NSPanel {
     /// a fullscreen one — so join all spaces and float. Outside fullscreen both
     /// would put the panel over unrelated apps, so it stays `.normal` there.
     func setOverlay(_ on: Bool) {
-        collectionBehavior = on ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.fullScreenAuxiliary]
+        overlay = on
+        collectionBehavior = Self.behavior(overlay: on)
         level = on ? .floating : .normal
+    }
+
+    /// Re-read the Mission Control preference. The window server only looks at
+    /// `collectionBehavior` when it is set, so a live change has to be pushed.
+    func refreshCollectionBehavior() {
+        collectionBehavior = Self.behavior(overlay: overlay)
+    }
+
+    /// `.transient` takes the panel out of the Mission Control and Exposé
+    /// overview — the Finder window then shows there alone. It also means the
+    /// window is unmanaged by Spaces, which is fine here: `updatePanelVisibility`
+    /// already decides per space whether the panel belongs on screen.
+    private static func behavior(overlay: Bool) -> NSWindow.CollectionBehavior {
+        var b: NSWindow.CollectionBehavior =
+            overlay ? [.canJoinAllSpaces, .fullScreenAuxiliary] : [.fullScreenAuxiliary]
+        if AppSettings.hideInMissionControl { b.insert(.transient) }
+        return b
     }
 
 

@@ -64,8 +64,9 @@ opens one and docks to it.
   window and the folder.
 
 Everything else lives behind the menu bar icon: theme, custom themes, keyboard shortcut, font size,
-dock side (top / right / bottom / left), which window keeps focus when the terminal opens, and
-whether the close warning always shows or only when a process is running.
+dock side (top / right / bottom / left), which window keeps focus when the terminal opens, whether
+the close warning always shows or only when a process is running, and whether the terminal is hidden
+in Mission Control so only the Finder window appears there.
 
 ## Theme
 

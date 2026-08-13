@@ -11,6 +11,7 @@ struct SettingsView: View {
 
     @AppStorage(AppSettings.themeKey) private var themeSelection = ThemeSelection.profile.storageValue
     @AppStorage(AppSettings.fontSizeKey) private var fontSize = 0.0
+    @AppStorage(AppSettings.hideInMissionControlKey) private var hideInMissionControl = false
     @State private var customThemes = AppSettings.customThemes
     @State private var themesExpanded = false
     @State private var customExpanded = false
@@ -92,6 +93,24 @@ struct SettingsView: View {
                     AlertsRadios()
                         .frame(maxWidth: 340)
                 }
+
+                Divider()
+
+                // Lone boolean: brandbook 7.2 label-plus-switch row, no section
+                // header — a header here would only repeat the label.
+                HStack(spacing: 6) {
+                    Text("Hide FinderTerminal in Mission Control")
+                        .font(.system(size: 13))
+                    Spacer()
+                    Toggle("", isOn: $hideInMissionControl)
+                        .toggleStyle(.switch)
+                        .scaleEffect(0.55)
+                        .frame(width: 36, height: 20)
+                        .tint(AppColors.brand)
+                        .labelsHidden()
+                        .cursor(.pointingHand)
+                }
+                .frame(maxWidth: 340)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
