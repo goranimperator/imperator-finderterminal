@@ -3,6 +3,14 @@ BUNDLE   = build/$(APP_NAME).app
 DIST     = dist
 ZIP      = $(DIST)/Imperator-FinderTerminal-$(VERSION).zip
 BUILD_NUMBER = $(shell git rev-list --count HEAD)
+# What `release` stamps, and it is not BUILD_NUMBER. `release` makes one commit
+# before it tags, but every use of BUILD_NUMBER in that target expands BEFORE
+# that commit exists — so the number counts every commit except the release's
+# own, and the build the tag points at claims to be one older than it is.
+# Shipped that way three times: v1.0.0 carries 21 against 22 commits, v1.0.1
+# carries 23 against 24, v1.0.2 carries 25 against 26. Same count plus the
+# commit `release` is about to make.
+RELEASE_BUILD_NUMBER = $(shell git rev-list --count HEAD | awk '{print $$1 + 1}')
 # Optional lead sentence for the release notes, e.g. NOTES="Fixes the ... bug."
 NOTES ?=
 
@@ -50,8 +58,10 @@ dist: check-version release-build
 release: check-version
 	@git diff --quiet && git diff --cached --quiet || { echo "Working tree dirty -- commit first."; exit 1; }
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" Resources/Info.plist
-	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" Resources/Info.plist
-	$(MAKE) dist VERSION=$(VERSION)
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(RELEASE_BUILD_NUMBER)" Resources/Info.plist
+	# Handed down explicitly, so the zip and the source plist agree. `dist` on its
+	# own is a test build that makes no commit, and there its plain count is right.
+	$(MAKE) dist VERSION=$(VERSION) BUILD_NUMBER=$(RELEASE_BUILD_NUMBER)
 	git add Resources/Info.plist
 	git commit -m "Release v$(VERSION)"
 	git tag -a v$(VERSION) -m "$(APP_NAME) $(VERSION)"

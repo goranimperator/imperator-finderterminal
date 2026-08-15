@@ -17,7 +17,9 @@ Everything routes through `build.sh`: SwiftPM compile, bundle assembly, codesign
 stale process keeps the old event tap alive.
 
 `make release` needs `gh` and a clean working tree. Tags are plain semver (`v1.0.0`); the app name
-lives in the release title. `CFBundleVersion` comes from the commit count.
+lives in the release title. `CFBundleVersion` is the commit count INCLUDING the release commit —
+`git rev-list --count HEAD` plus one, since that commit does not exist yet when the target stamps
+the number. `RELEASE_BUILD_NUMBER` in the Makefile is the value, not `BUILD_NUMBER`.
 
 ## Signing
 
