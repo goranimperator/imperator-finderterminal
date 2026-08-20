@@ -8,8 +8,8 @@ Guidance for Claude Code (claude.ai/code) when working in this repository.
 make install                  # Release build, kill old process, install to /Applications, launch
 make                          # Debug build into build/
 make clean                    # Remove build/ and .build/
-make dist VERSION=1.0.0       # Build + zip to dist/ -- no git or remote writes
-make release VERSION=1.0.0    # Bump Info.plist, commit, tag, push, publish GitHub release
+make dist VERSION=x.y.z       # Build + zip to dist/ -- no git or remote writes
+make release VERSION=x.y.z    # Bump Info.plist, commit, tag, push, publish GitHub release
 ```
 
 Everything routes through `build.sh`: SwiftPM compile, bundle assembly, codesign. Use

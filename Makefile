@@ -35,7 +35,7 @@ clean:
 	rm -rf build .build
 
 check-version:
-	@test -n "$(VERSION)" || { echo "Usage: make $(MAKECMDGOALS) VERSION=1.0.0"; exit 1; }
+	@test -n "$(VERSION)" || { echo "Usage: make $(MAKECMDGOALS) VERSION=x.y.z"; exit 1; }
 
 # Build a distributable zip. Signed with the same "Imperator Dev" identity as a
 # local build: the designated requirement then pins that certificate instead of

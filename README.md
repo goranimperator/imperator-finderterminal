@@ -125,20 +125,20 @@ Line Tools is enough; full Xcode is not needed.
 Build a distributable zip without touching git or the remote:
 
 ```bash
-make dist VERSION=1.0.0
+make dist VERSION=x.y.z
 ```
 
-Cut a full release — bumps `Info.plist`, commits, tags `v1.0.0`, pushes, and publishes a GitHub
+Cut a full release — bumps `Info.plist`, commits, tags the version, pushes, and publishes a GitHub
 release with the zip attached:
 
 ```bash
-make release VERSION=1.0.0
+make release VERSION=x.y.z
 ```
 
 Requires the [GitHub CLI](https://cli.github.com) (`brew install gh`, then `gh auth login`) and a
-clean working tree. Tags are plain semver; the app name lives in the release title. `CFBundleVersion`
-comes from the commit count. Released builds carry the same `Imperator Dev` signature as local ones,
-so the permission grants survive an update.
+clean working tree. Tags are plain semver; the app name lives in the release title.
+`CFBundleVersion` is the commit count including the release commit itself. Released builds carry the
+same `Imperator Dev` signature as local ones, so the permission grants survive an update.
 
 ## Layout
 
