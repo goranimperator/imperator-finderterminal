@@ -153,7 +153,12 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
 | `Sources/FinderTerminal/CloseGuard.swift` | Event tap for `⌘W`, close button and minimize |
 | `Sources/FinderTerminal/FinderBridge.swift` | Apple events to and from Finder |
 | `Sources/FinderTerminal/TerminalTheme.swift` | Terminal.app profile decoding and presets |
+| `Sources/FinderTerminal/Hotkey.swift` | Carbon global hotkey registration |
+| `Sources/FinderTerminal/PathUtil.swift` | Path quoting and normalisation |
 | `Sources/FinderTerminal/PopoverView.swift`, `SettingsView.swift` | Menu bar popover, Settings window, About |
+| `Sources/FinderTerminal/Settings.swift` | `UserDefaults` keys, dock sides, theme model |
+| `Sources/FinderTerminal/DevRemote.swift` | Headless control for verification, debug builds only |
+| `Sources/FinderTerminal/main.swift` | Entry point |
 | `Vendor/SwiftTerm/` | Vendored terminal emulator, patched (see its README) |
 
 ## Known limits
@@ -162,8 +167,9 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
   so docking can be off on secondary displays. Single display is exact.
 - **Non-zsh shells.** OSC 7 comes from the system zsh wiring, so bash and fish do not emit it and
   only the Finder-to-terminal direction syncs.
-- **Mission Control** shows the Finder window and the terminal as two separate windows. Picking
-  either raises both, but they cannot be grouped into one.
+- **Mission Control** shows the Finder window and the terminal as two tiles. macOS has no
+  cross-app window grouping, so they cannot be merged into one — but Settings can keep the terminal
+  out of the overview entirely, which leaves the Finder window there alone. Off by default.
 - **Private API.** Fullscreen docking depends on SkyLight and may stop working on a future macOS.
   Everything else uses public API.
 - Not sandboxed, so not App Store material. It needs to spawn a PTY, send Apple events and use the
