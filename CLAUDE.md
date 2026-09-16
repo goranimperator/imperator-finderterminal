@@ -16,6 +16,14 @@ Everything routes through `build.sh`: SwiftPM compile, bundle assembly, codesign
 `make install` after code changes — it kills the running copy first, which is required, because a
 stale process keeps the old event tap alive.
 
+**Every release goes through the README first.** Not only the first one. Diff
+`$(git describe --tags --abbrev=0)..HEAD` and correct what the release made untrue: a new setting
+belongs in the settings list, a limitation the release lifted belongs in Known limits, a new source
+file belongs in the layout table. Version numbers in command examples stay `x.y.z`, never a real
+version — they read as a claim about the app otherwise. v1.0.2 shipped with Known limits still
+saying the terminal could not be kept out of Mission Control, which is the thing that release added.
+The `imperator-release` skill has the full checklist.
+
 `make release` needs `gh` and a clean working tree. Tags are plain semver (`v1.0.0`); the app name
 lives in the release title. `CFBundleVersion` is the commit count INCLUDING the release commit —
 `git rev-list --count HEAD` plus one, since that commit does not exist yet when the target stamps

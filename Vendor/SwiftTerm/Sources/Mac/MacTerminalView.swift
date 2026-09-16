@@ -281,6 +281,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
 
     var selection: SelectionService!
     private var scroller: NSScroller!
+    // PATCH (imperator-finder-terminal): fades the scroller back out, see flashScroller().
+    private var scrollerFadeTimer: Timer?
     
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
     // of attributes for an NSAttributedString
@@ -804,6 +806,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         scroller.scrollerStyle = scrollerStyle
         scroller.knobProportion = 0.1
         scroller.isEnabled = false
+        // PATCH (imperator-finder-terminal): start invisible, see flashScroller().
+        scroller.alphaValue = 0
         if let progressBarView {
             addSubview(progressBarView, positioned: .above, relativeTo: scroller)
         }
@@ -855,6 +859,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     open func scrolled(source terminal: Terminal, yDisp: Int) {
         //selectionView.notifyScrolled(source: terminal)
         updateScroller()
+        flashScroller()     // PATCH (imperator-finder-terminal)
         terminalDelegate?.scrolled(source: self, position: scrollPosition)
     }
     
@@ -901,6 +906,36 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         scroller.isEnabled = canScroll
         scroller.doubleValue = scrollPosition
         scroller.knobProportion = scrollThumbsize
+    }
+
+    // PATCH (imperator-finder-terminal): an overlay scroller only auto-hides
+    // inside an NSScrollView. This one is a bare subview, so AppKit draws it
+    // forever and it reads as a permanent grey bar down the right edge. Show it
+    // while the user scrolls and fade it out again, the way the system does.
+    //
+    // Opacity only, never `isHidden`: `reservedScrollerWidth` returns 0 for a
+    // hidden scroller, so hiding it would reflow the terminal on every scroll.
+    private static let scrollerVisibleDuration: TimeInterval = 1.0
+    private static let scrollerFadeDuration: TimeInterval = 0.35
+
+    func flashScroller () {
+        guard let scroller else { return }
+        scrollerFadeTimer?.invalidate()
+        guard canScroll else {
+            scroller.alphaValue = 0
+            return
+        }
+        scroller.layer?.removeAllAnimations()
+        scroller.alphaValue = 1
+        scrollerFadeTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.scrollerVisibleDuration, repeats: false
+        ) { [weak self] _ in
+            guard let scroller = self?.scroller else { return }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Self.scrollerFadeDuration
+                scroller.animator().alphaValue = 0
+            }
+        }
     }
     
     var userScrolling = false
@@ -2675,6 +2710,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         if event.deltaY == 0 {
             return
         }
+        flashScroller()     // PATCH (imperator-finder-terminal)
         if allowMouseReporting && !shiftBypassesMouseReporting(for: event) && terminal.mouseMode != .off {
             let hit = calculateMouseHit(with: event)
             let displayBuffer = terminal.displayBuffer

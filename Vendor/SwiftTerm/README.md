@@ -40,6 +40,20 @@ case .defaultInvertedColor:
 
 Still present upstream as of `main` @ 6918d74 (2026-07-27).
 
+### `Sources/Mac/MacTerminalView.swift` - the scroller auto-hides
+
+`setupScroller()` creates an `NSScroller` as a plain subview and sets
+`scrollerStyle = .overlay`. Overlay scrollers only auto-hide when AppKit owns
+them inside an `NSScrollView`; a bare subview is drawn forever, so the terminal
+carried a permanent grey bar down its right edge.
+
+Patched to start at `alphaValue = 0` and to call a new `flashScroller()` from
+`scrolled(source:yDisp:)` and `scrollWheel(with:)`: full opacity while scrolling,
+then a 0.35 s fade back to zero one second later.
+
+Opacity, never `isHidden`: `reservedScrollerWidth` returns 0 for a hidden
+scroller, so toggling `isHidden` would reflow the terminal on every scroll.
+
 ## Updating
 
 1. Clone upstream at the new tag, copy `Sources/SwiftTerm` over `Sources` here,

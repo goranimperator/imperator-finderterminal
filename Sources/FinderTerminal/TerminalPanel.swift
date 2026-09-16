@@ -26,17 +26,29 @@ final class TerminalPanel: NSPanel {
     /// Breathing room between the Finder window and the terminal body. The panel's
     /// window frame includes this transparent strip so the splitter can live in it.
     static let gap: CGFloat = 8
-    /// macOS Tahoe window corner radius (measured against a real Finder window).
-    private static let windowRadius: CGFloat = 26
+    /// macOS 27 window corner radius. Measured twice, not guessed. A real Finder
+    /// window captured with `screencapture -o -l<id>` has an alpha silhouette whose
+    /// corner stops curving 42 device pixels in. Rendering this same layer
+    /// (`.continuous`, masked) at 2x and measuring the identical way gives 41 px at
+    /// radius 18 and 46 px at radius 20, so 18 is the match. Do not reason from the
+    /// radius to the visual size: a continuous corner spreads well past its radius,
+    /// which is why the old 26 pt (macOS 26's value) read as noticeably rounder than
+    /// the window it docks to once 27 tightened the system corners.
+    private static let windowRadius: CGFloat = 18
     /// Concentric with the window radius: outer radius minus the chrome padding.
-    private static let plateRadius: CGFloat = 16
+    private static let plateRadius: CGFloat = 10
     private static let handleHeight: CGFloat = 8
     /// Hit zone for the gap splitter: the gap itself + a few points into the body.
     private static let gapHitHeight: CGFloat = 14
     /// Chrome padding: window edge -> terminal plate (Finder color shows here).
-    private static let outer: CGFloat = 10
-    /// Plate padding: plate edge -> text (terminal background shows here).
-    private static let inner: CGFloat = 10
+    /// Taken from the system, not chosen: a macOS 27 Finder toolbar button sits 8 pt
+    /// off the window edge. Measured on a real window capture, where the luminance
+    /// along a row through the search button's centre holds the window background
+    /// for 15 device pixels and the button's own fill starts at 16.
+    private static let outer: CGFloat = 8
+    /// Plate padding: plate edge -> text (terminal background shows here). Same
+    /// value, so the text sits as far off the plate as the plate sits off the window.
+    private static let inner: CGFloat = 8
 
     /// Splitter drag in the gap; positive = grow the terminal (toward Finder).
     var onResizeDrag: ((CGFloat) -> Void)?

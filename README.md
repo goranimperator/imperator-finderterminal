@@ -11,8 +11,8 @@ window, attaches a themed terminal in the freed space, and keeps the two pointed
 
 ## Requirements
 
-Requires macOS 14 or later, Apple silicon. Built and tested on macOS 26 only — older versions are
-expected to work but have not been verified.
+Requires macOS 14 or later, Apple silicon. Built and tested on macOS 26 and 27 only - older
+versions are expected to work but have not been verified.
 
 Install at your own risk. The app is not notarized and carries no Apple Developer signature, so
 macOS cannot vouch for it. It is provided as is, with no warranty, under the MIT license.
@@ -117,8 +117,15 @@ make clean
 
 `make` and `make install` both call `./build.sh`, which compiles with SwiftPM, assembles the bundle
 and codesigns it with the local `Imperator Dev` identity so macOS keeps the permission grants across
-rebuilds. Override with `CODESIGN_IDENTITY=... ./build.sh`. The Swift toolchain from the Command
-Line Tools is enough; full Xcode is not needed.
+rebuilds. Override with `CODESIGN_IDENTITY=... ./build.sh`.
+
+Building needs Xcode, not only the Command Line Tools: the vendored terminal ships a Metal shader,
+and on macOS 27 the Metal compiler is no longer installed with Xcode. Without it the build stops at
+`cannot execute tool 'metal' due to missing Metal Toolchain`. Install it once:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain
+```
 
 ## Release
 
@@ -183,9 +190,11 @@ sessions per Finder window, panel size memory.
 ## Third-party
 
 [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza, MIT licensed, vendored in
-`Vendor/SwiftTerm` at v1.14.0 with one local patch. The patch and the steps to move to a newer
-upstream release are documented in [`Vendor/SwiftTerm/README.md`](Vendor/SwiftTerm/README.md); the
-upstream license is kept at [`Vendor/SwiftTerm/LICENSE`](Vendor/SwiftTerm/LICENSE).
+`Vendor/SwiftTerm` at v1.14.0 with two local patches: reverse video swaps the default colors instead
+of inverting them, and the scroll indicator fades out when nothing is scrolling. Both patches and the
+steps to move to a newer upstream release are documented in
+[`Vendor/SwiftTerm/README.md`](Vendor/SwiftTerm/README.md); the upstream license is kept at
+[`Vendor/SwiftTerm/LICENSE`](Vendor/SwiftTerm/LICENSE).
 
 ## License
 
