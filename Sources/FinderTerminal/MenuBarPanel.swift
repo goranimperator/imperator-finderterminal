@@ -9,11 +9,20 @@ import SwiftUI
 /// the popover API sets that radius, so matching the system's window shape means
 /// drawing the surface here instead.
 ///
-/// Brandbook 13: a window-shaped surface the app draws itself is 18pt with
-/// `cornerCurve = .continuous`, which is the measured macOS 27 window radius.
+/// The radius is the menu bar popup's own, not the window radius. Brandbook 13
+/// carries 18pt for window-shaped surfaces and says in as many words that the
+/// popup surface has not been measured separately and should be, rather than
+/// inheriting the window figure. Measured here: the macOS 27 menu bar popup
+/// corner stops curving 20 device pixels in, against a window's 42.
 final class MenuBarPanel: NSPanel {
-    /// Brandbook 13: measured macOS 27 window corner.
-    static let cornerRadius: CGFloat = 18
+    /// Measured: a menu bar popup's corner stops curving 20 device pixels in,
+    /// against a window's 42. Do not substitute the 18pt window radius here; a
+    /// popup is tighter than a window on macOS 27.
+    ///
+    /// Circular, not `.continuous`: the mask that clips the material is a
+    /// `NSBezierPath` rounded rect, which is a circular arc, and mixing the two
+    /// curves adds them into a corner wider than either.
+    static let cornerRadius: CGFloat = 10
     /// Gap between the menu bar and the panel's top edge.
     private static let menuBarGap: CGFloat = 6
 
@@ -46,17 +55,24 @@ final class MenuBarPanel: NSPanel {
         hasShadow = true
         isMovable = false
 
-        // The rounded surface: one layer-backed container, clipped to the window
-        // radius, with the hosted SwiftUI view inside it. The hairline matches
-        // the one a real window edge draws.
-        let container = NSView()
+        // The surface is the system's own popover material, not a colour copied
+        // out of a screenshot: `NSVisualEffectView` with `.popover` blends what
+        // is behind the panel exactly the way AppKit does for a real one, and it
+        // tracks appearance and accessibility settings for free. The SwiftUI
+        // content then lays brandbook 6.1's `.black.opacity(0.15)` over it.
+        let container = NSVisualEffectView()
+        container.material = .popover
+        container.blendingMode = .behindWindow
+        container.state = .active
         container.wantsLayer = true
         container.layer?.cornerRadius = Self.cornerRadius
-        container.layer?.cornerCurve = .continuous
+        container.layer?.cornerCurve = .circular
         container.layer?.masksToBounds = true
         container.layer?.borderWidth = 0.5
         container.layer?.borderColor = NSColor(white: 1, alpha: 0.08).cgColor
-        container.layer?.backgroundColor = AppColors.backgroundNS.cgColor
+        // Clip the effect view itself, or the material is drawn square behind
+        // the rounded layer and the corners come back filled.
+        container.maskImage = Self.cornerMask(radius: Self.cornerRadius)
 
         host.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(host)
@@ -124,6 +140,20 @@ final class MenuBarPanel: NSPanel {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         clickMonitor = nil
         keyMonitor = nil
+    }
+
+    /// A resizable mask with the panel's corner, so `NSVisualEffectView` blends
+    /// only inside the rounded shape.
+    private static func cornerMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     // A borderless panel refuses key status by default, which would leave the
