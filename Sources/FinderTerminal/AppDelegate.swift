@@ -3,7 +3,7 @@ import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
-    private var popover: NSPopover!
+    private var panel: MenuBarPanel!
     private var eventMonitor: Any?
     private var hotkey: Hotkey?
     private var closeGuard: CloseGuard?
@@ -373,34 +373,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Brandbook 6.1 / 18.1: 340pt transient popover with SwiftUI content.
+    // Brandbook 6.1 / 18.1: 340pt transient menu bar panel with SwiftUI content.
+    // Drawn as an NSPanel rather than an NSPopover so the corner can be the
+    // measured macOS 27 window radius -- see MenuBarPanel.
     private func setupPopover() {
-        popover = NSPopover()
-        popover.behavior = .transient
-        popover.animates = true
-        let host = NSHostingController(rootView: PopoverContentView(
-            onToggleTerminal: { [weak self] in
-                self?.popover.performClose(nil)
-                self?.toggleTerminal()
-            },
-            onShowAbout: { [weak self] in
-                self?.popover.performClose(nil)
-                self?.showAbout()
-            },
-            onShowSettings: { [weak self] in
-                self?.popover.performClose(nil)
-                self?.showSettings()
-            }
-        ))
-        host.sizingOptions = [.preferredContentSize]
-        popover.contentViewController = host
-        popover.contentSize = NSSize(width: 340, height: host.view.fittingSize.height)
-
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            self?.popover.performClose(nil)
-        }
+        panel = MenuBarPanel(
+            content: PopoverContentView(
+                onToggleTerminal: { [weak self] in
+                    self?.panel.close()
+                    self?.toggleTerminal()
+                },
+                onShowAbout: { [weak self] in
+                    self?.panel.close()
+                    self?.showAbout()
+                },
+                onShowSettings: { [weak self] in
+                    self?.panel.close()
+                    self?.showSettings()
+                }
+            ),
+            width: 340
+        )
     }
 
     // Brandbook 10.2: About panel -- standalone NSPanel, 300x260, transparent title bar.
@@ -433,10 +426,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePopover() {
         guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(nil)
+        if panel.isShown {
+            panel.close()
         } else {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            panel.show(from: button)
             NSApp.activate(ignoringOtherApps: true)
         }
     }

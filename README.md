@@ -172,7 +172,8 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
 | `Sources/FinderTerminal/TerminalTheme.swift` | Terminal.app profile decoding and presets |
 | `Sources/FinderTerminal/Hotkey.swift` | Carbon global hotkey registration |
 | `Sources/FinderTerminal/PathUtil.swift` | Path quoting and normalisation |
-| `Sources/FinderTerminal/PopoverView.swift`, `SettingsView.swift` | Menu bar popover, Settings window, About |
+| `Sources/FinderTerminal/MenuBarPanel.swift` | The menu bar panel: window-radius surface, placement, dismissal |
+| `Sources/FinderTerminal/PopoverView.swift`, `SettingsView.swift` | Menu bar panel content, Settings window, About |
 | `Sources/FinderTerminal/Settings.swift` | `UserDefaults` keys, dock sides, theme model |
 | `Sources/FinderTerminal/DevRemote.swift` | Headless control for verification, debug builds only |
 | `Sources/FinderTerminal/main.swift` | Entry point |
