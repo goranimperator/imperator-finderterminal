@@ -105,7 +105,6 @@ struct SettingsView: View {
                     Toggle("", isOn: $hideInMissionControl)
                         .toggleStyle(.switch)
                         .scaleEffect(0.55)
-                        .frame(width: 36, height: 20)
                         .tint(AppColors.brand)
                         .labelsHidden()
                         .cursor(.pointingHand)

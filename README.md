@@ -119,6 +119,16 @@ make clean
 and codesigns it with the local `Imperator Dev` identity so macOS keeps the permission grants across
 rebuilds. Override with `CODESIGN_IDENTITY=... ./build.sh`.
 
+The build stamps the binary with the newest installed SDK while leaving the minimum at macOS 14.
+AppKit chooses which generation of every control to draw from that stamp, and SwiftPM otherwise
+writes the deployment target there, which made the app draw macOS 14 era controls on macOS 27.
+Check it with:
+
+```bash
+otool -l "build/Imperator FinderTerminal.app/Contents/MacOS/FinderTerminal" \
+    | awk '/LC_BUILD_VERSION/,/^$/' | grep -E "minos|sdk"
+```
+
 Building needs Xcode, not only the Command Line Tools: the vendored terminal ships a Metal shader,
 and on macOS 27 the Metal compiler is no longer installed with Xcode. Without it the build stops at
 `cannot execute tool 'metal' due to missing Metal Toolchain`. Install it once:

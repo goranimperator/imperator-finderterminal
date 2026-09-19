@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.4
 import PackageDescription
 
 let package = Package(
@@ -18,12 +18,16 @@ let package = Package(
             exclude: ["Mac/README.md"],
             // The Metal renderer loads its shader through Bundle.module, which
             // only exists once the target declares a resource.
-            resources: [.process("Apple/Metal/Shaders.metal")]
+            resources: [.process("Apple/Metal/Shaders.metal")],
+            // Swift 6 language mode is a separate migration: upstream SwiftTerm
+            // predates strict concurrency and fails on it.
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
             name: "FinderTerminal",
             dependencies: ["SwiftTerm"],
-            path: "Sources/FinderTerminal"
+            path: "Sources/FinderTerminal",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
