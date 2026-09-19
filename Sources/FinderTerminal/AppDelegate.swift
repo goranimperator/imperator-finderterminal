@@ -471,6 +471,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             devLog("probe: position -> \(AppSettings.position.rawValue)")
         case "settings":
             showSettings()
+        case "menubar":
+            // The panel hides itself when the app deactivates, so a probe fired
+            // from another app has to bring this one forward the way a click on
+            // the status item does.
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.togglePopover()
+            }
         case let c where c.hasPrefix("mc "):
             // In-process write, like the Settings toggle: an external `defaults
             // write` does not reliably post UserDefaults.didChangeNotification.
