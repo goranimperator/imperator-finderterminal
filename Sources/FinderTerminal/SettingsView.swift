@@ -107,7 +107,6 @@ struct SettingsView: View {
                         .scaleEffect(0.55)
                         .tint(AppColors.brand)
                         .labelsHidden()
-                        .cursor(.pointingHand)
                 }
                 .frame(maxWidth: 340)
             }
