@@ -4,7 +4,6 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: MenuBarPanel!
-    private var eventMonitor: Any?
     private var hotkey: Hotkey?
     private var closeGuard: CloseGuard?
     private var mouseMonitors: [Any] = []

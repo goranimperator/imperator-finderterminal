@@ -39,7 +39,8 @@ The app is not notarized, so Gatekeeper blocks the first launch on any machine e
 
 ## Architecture
 
-Background menu-bar app (`LSUIElement`), AppKit with SwiftUI for the popover, Settings and About.
+Background menu-bar app (`LSUIElement`), AppKit with SwiftUI for the menu bar panel, Settings
+and About.
 One terminal per Finder window, keyed by `CGWindowID`.
 
 | File | Role |
@@ -53,7 +54,8 @@ One terminal per Finder window, keyed by `CGWindowID`.
 | `CloseGuard.swift` | CGEventTap for ⌘W, the close button and minimize starts |
 | `FinderBridge.swift` | Apple events to and from Finder |
 | `TerminalTheme.swift` | Terminal.app profile decoding and the bundled presets |
-| `PopoverView.swift`, `SettingsView.swift`, `Settings.swift` | Popover, Settings window, About, `@AppStorage` |
+| `MenuBarPanel.swift` | The menu bar panel itself: surface, corner, placement, dismissal |
+| `PopoverView.swift`, `SettingsView.swift`, `Settings.swift` | Panel content, Settings window, About, `@AppStorage` |
 | `Vendor/SwiftTerm/` | Vendored terminal emulator with one local patch — see its README |
 
 Key constraints learned the hard way, do not undo them:

@@ -3,46 +3,62 @@ import SwiftUI
 
 /// The menu bar panel, drawn by the app rather than by `NSPopover`.
 ///
-/// `NSPopover` draws its own frame and gives no way to set the radius. On macOS
-/// 27 that frame is far rounder than the popup the system itself puts under a
-/// menu bar item: measured with `screencapture -o -l`, an `NSPopover` from a
-/// binary stamped `sdk 27.0` stops curving 87 device pixels in, while the popup
-/// under Imperator WidgetClock, whose binary still carries an old stamp and so
-/// still gets the old frame, stops at 20. Matching the system popup therefore
-/// means drawing the surface here.
+/// `NSPopover` draws its own frame and gives no way to set the radius, and
+/// neither of the two frames it draws is the one macOS uses in the menu bar. On
+/// macOS 27 a binary stamped `sdk 27.0` gets a 26.25 pt squircle, and one
+/// stamped `sdk 14.0` gets a 9.5 pt circular corner. The system's own menu bar
+/// panel is neither: Control Centre's Wi-Fi panel, captured with
+/// `screencapture -o -l` and fitted on its bottom corner, measures 17.50 pt at
+/// 309 x 290 drawn points. A plain titled window measures 17.25 by the same
+/// method, so a menu bar panel is a window corner rather than a popover one.
 ///
-/// Everything below is measured off that WidgetClock popup rather than guessed:
-/// the corner, the arrow's height and base, and the material.
+/// Drawing the surface here is the only way to land on that number.
 final class MenuBarPanel: NSPanel {
-    /// Measured: the menu bar popup's corner stops curving 20 device pixels in,
-    /// against a Finder window's 42. Do not substitute brandbook 13's 18pt
-    /// window radius; a popup is tighter than a window on macOS 27.
+    /// Set so the panel *draws* the corner macOS draws.
     ///
-    /// Circular, not `.continuous`: the shape is built with `NSBezierPath`,
-    /// whose rounded rect is a circular arc, and mixing the two curves adds them
-    /// into a corner measuring 33 device pixels instead of 19.
-    static let cornerRadius: CGFloat = 10
-    /// Measured: the arrow rises 18 device pixels from the body to its tip.
-    private static let arrowHeight: CGFloat = 9
-    /// Measured: 44 device pixels across where it meets the body.
-    private static let arrowWidth: CGFloat = 22
-    /// Gap between the menu bar and the arrow's tip.
+    /// The target is Control Centre's Wi-Fi panel on macOS 27: captured with
+    /// `screencapture -o -l` and fitted on its bottom corner, it measures 35.0
+    /// device pixels, 17.50 pt, rms 0.38. A plain titled window measures 17.25
+    /// by the same method, so a menu bar panel is a window corner rather than a
+    /// popover one: `NSPopover` draws 26.25 pt from a binary stamped
+    /// `sdk 27.0` and 9.5 pt from one stamped `sdk 14.0`, and neither is this.
+    ///
+    /// 18.25 rather than 17.5 because `NSVisualEffectView` blends its edge, so
+    /// the drawn corner measures about 0.75 pt tighter than the radius asked
+    /// for. Measured both ways on this app's own panel: at 17.5 it drew 16.75,
+    /// at 18.25 it draws 17.50, which is the Wi-Fi panel exactly.
+    ///
+    /// Circular, not `.continuous`. The Wi-Fi panel fits a circle at n=2.2.
+    static let cornerRadius: CGFloat = 18.25
+    /// Gap between the menu bar and the panel's top edge.
     private static let menuBarGap: CGFloat = 2
 
     private let host: NSHostingView<AnyView>
     private let container = NSVisualEffectView()
-    private let shape = CAShapeLayer()
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     /// The menu bar button this panel hangs off, so a click on it is left to the
     /// button's own action instead of being treated as a click outside.
     private weak var anchor: NSStatusBarButton?
-    /// Where the arrow points, in the panel's own coordinates.
-    private var arrowCenterX: CGFloat = 0
-
     /// Called when the panel closes itself, so the owner can drop its reference
     /// to the monitors and keep the menu bar button's pressed state honest.
     var onClose: (() -> Void)?
+
+    /// The height the panel opens at, when the app computes it itself.
+    ///
+    /// SwiftUI's fitting size is right for most content and a point short for
+    /// some: a list whose rows are laid out by hand knows its own height, and a
+    /// panel that opens a point short opens clipped. Left unset, the fitting
+    /// size decides.
+    var contentHeight: (() -> CGFloat)?
+
+    /// Asked before an outside click closes the panel.
+    ///
+    /// A panel that owns a window of its own has to be able to say so. The
+    /// clock's colour wheel is an `NSColorPanel`, a separate window: every
+    /// click in it is a click outside this panel, and closing on it would leave
+    /// the wheel pointing at a dead binding and drop the colour.
+    var shouldCloseOnOutsideClick: () -> Bool = { true }
 
     init<Content: View>(content: Content, width: CGFloat) {
         host = NSHostingView(rootView: AnyView(content))
@@ -71,18 +87,20 @@ final class MenuBarPanel: NSPanel {
         container.blendingMode = .behindWindow
         container.state = .active
         container.wantsLayer = true
-        // A layer mask, not `maskImage`: the shape has an arrow at a position
-        // that moves with the status item, and a resizable mask image can only
-        // stretch a fixed picture.
-        container.layer?.mask = shape
+        // No arrow, and therefore no mask path to build: macOS 27 does not put
+        // one on its own menu bar panels. Control Centre's Wi-Fi panel is a
+        // plain rounded rectangle under the item, so this is a layer corner on
+        // the effect view and nothing more.
+        container.layer?.cornerRadius = Self.cornerRadius
+        container.layer?.cornerCurve = .circular
+        container.layer?.masksToBounds = true
 
         host.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(host)
         NSLayoutConstraint.activate([
             host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            // The content sits below the arrow, which occupies the top strip.
-            host.topAnchor.constraint(equalTo: container.topAnchor, constant: Self.arrowHeight),
+            host.topAnchor.constraint(equalTo: container.topAnchor),
             host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         contentView = container
@@ -95,23 +113,23 @@ final class MenuBarPanel: NSPanel {
         guard let buttonWindow = button.window else { return }
         anchor = button
 
-        let size = host.fittingSize
-        setContentSize(NSSize(width: frame.width, height: size.height + Self.arrowHeight))
+        let height = contentHeight?() ?? host.fittingSize.height
+        setContentSize(NSSize(width: frame.width, height: height))
 
         let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
         let screen = buttonWindow.screen ?? NSScreen.main
         var x = buttonFrame.midX - frame.width / 2
-        // Keep the whole panel on screen when the item sits near an edge. The
-        // arrow then slides within the panel instead, so it still points at the
-        // item rather than the panel's middle.
+        // Keep the whole panel on screen when the item sits near an edge, the
+        // way the system's own panels slide rather than hang off.
         if let visible = screen?.visibleFrame {
             x = min(max(x, visible.minX + 8), visible.maxX - frame.width - 8)
         }
         setFrameTopLeftPoint(NSPoint(x: x, y: buttonFrame.minY - Self.menuBarGap))
 
-        arrowCenterX = buttonFrame.midX - x
-        updateShape()
-
+        // No animation, on purpose. macOS 27 puts its own menu bar panels up
+        // and takes them down instantly: Control Centre's Wi-Fi panel appears
+        // fully formed under the item. A fade or a scale here would be the one
+        // thing marking these apps as not part of the system.
         orderFrontRegardless()
         startMonitoring()
     }
@@ -122,73 +140,24 @@ final class MenuBarPanel: NSPanel {
         onClose?()
     }
 
-    /// Rebuild the mask: a rounded body with an arrow on top, pointing at the
-    /// status item.
-    private func updateShape() {
-        let bounds = container.bounds
-        guard bounds.width > 0, bounds.height > Self.arrowHeight else { return }
-        shape.frame = bounds
-        shape.path = Self.outline(in: bounds, arrowCenterX: arrowCenterX)
-    }
-
-    override func layoutIfNeeded() {
-        super.layoutIfNeeded()
-        updateShape()
-    }
-
-    /// The panel's silhouette, in a bottom-left origin coordinate space.
-    private static func outline(in bounds: CGRect, arrowCenterX: CGFloat) -> CGPath {
-        let r = cornerRadius
-        let body = CGRect(x: bounds.minX, y: bounds.minY,
-                          width: bounds.width, height: bounds.height - arrowHeight)
-        // Keep the arrow's base inside the rounded corners.
-        let half = arrowWidth / 2
-        let cx = min(max(arrowCenterX, body.minX + r + half), body.maxX - r - half)
-        let tip = CGPoint(x: cx, y: bounds.maxY)   // one arrowHeight above the body
-        // Measured: the system's topmost arrow row is 8 device pixels wide.
-        let tipHalf: CGFloat = 2
-        let tipRound: CGFloat = 1
-
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: body.minX + r, y: body.minY))
-        path.addLine(to: CGPoint(x: body.maxX - r, y: body.minY))
-        path.addArc(tangent1End: CGPoint(x: body.maxX, y: body.minY),
-                    tangent2End: CGPoint(x: body.maxX, y: body.minY + r), radius: r)
-        path.addLine(to: CGPoint(x: body.maxX, y: body.maxY - r))
-        path.addArc(tangent1End: CGPoint(x: body.maxX, y: body.maxY),
-                    tangent2End: CGPoint(x: body.maxX - r, y: body.maxY), radius: r)
-        // The arrow: straight edges with a rounded tip, which is what the system
-        // draws. Measured on the system popup, its width grows roughly linearly
-        // from 8 device pixels at the tip to 44 at the base. A single quadratic
-        // across the whole arrow was tried first and gives a dome instead: 22
-        // device pixels wide a quarter of the way up, where the system is 8.
-        path.addLine(to: CGPoint(x: cx + half, y: body.maxY))
-        path.addLine(to: CGPoint(x: tip.x + tipHalf, y: tip.y - tipRound))
-        path.addQuadCurve(to: CGPoint(x: tip.x - tipHalf, y: tip.y - tipRound),
-                          control: CGPoint(x: tip.x, y: tip.y + tipRound))
-        path.addLine(to: CGPoint(x: cx - half, y: body.maxY))
-        path.addLine(to: CGPoint(x: body.minX + r, y: body.maxY))
-        path.addArc(tangent1End: CGPoint(x: body.minX, y: body.maxY),
-                    tangent2End: CGPoint(x: body.minX, y: body.maxY - r), radius: r)
-        path.addLine(to: CGPoint(x: body.minX, y: body.minY + r))
-        path.addArc(tangent1End: CGPoint(x: body.minX, y: body.minY),
-                    tangent2End: CGPoint(x: body.minX + r, y: body.minY), radius: r)
-        path.closeSubpath()
-        return path
-    }
-
-    /// Transient behaviour, which `NSPopover` gave for free: a click anywhere
-    /// else, or Escape, dismisses the panel.
     private func startMonitoring() {
         stopMonitoring()
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             guard let self else { return }
+            guard self.shouldCloseOnOutsideClick() else { return }
+            let pointer = NSEvent.mouseLocation
             // The status item's own click is the toggle. Closing here too would
             // race the button's action, which then reopens what it just closed.
             if let window = self.anchor?.window,
-               window.frame.contains(NSEvent.mouseLocation) { return }
+               window.frame.contains(pointer) { return }
+            // A global monitor is meant to see only other applications, but the
+            // first click into an inactive accessory app reaches it as well, so
+            // it arrives before the control under the cursor gets it and closes
+            // the panel out from under the click. Outside is decided by where
+            // the pointer is, not by which monitor saw the event.
+            if self.frame.contains(pointer) { return }
             self.close()
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
