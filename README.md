@@ -119,10 +119,17 @@ make clean
 and codesigns it with the local `Imperator Dev` identity so macOS keeps the permission grants across
 rebuilds. Override with `CODESIGN_IDENTITY=... ./build.sh`.
 
-The build stamps the binary with the newest installed SDK while leaving the minimum at macOS 14.
-AppKit chooses which generation of every control to draw from that stamp, and SwiftPM otherwise
-writes the deployment target there, which made the app draw macOS 14 era controls on macOS 27.
-Check it with:
+The build stamps the binary `sdk 26.0` while leaving the minimum at macOS 14. AppKit chooses which
+generation of every control to draw from that stamp, and SwiftPM otherwise writes the deployment
+target there, which made the app draw macOS 14 era controls on macOS 27.
+
+The stamp is 26.0 rather than the newest installed SDK on purpose. Stamped 27.0, every hosted
+SwiftUI view in the app redraws once from an `@AppStorage` change and then stops: the value is
+written and acted on, but every radio and switch keeps showing whatever the first change left. The
+panel and the switches render byte-identically under 26.0 and 27.0, so the newer stamp buys nothing
+here. Override with `SDK_VERSION=... ./build.sh`.
+
+Check the stamp with:
 
 ```bash
 otool -l "build/Imperator FinderTerminal.app/Contents/MacOS/FinderTerminal" \

@@ -17,12 +17,6 @@ enum AppColors {
 // MARK: - Brandbook 2.7: View extensions
 
 extension View {
-    func cursor(_ cursor: NSCursor) -> some View {
-        onHover { inside in
-            if inside { cursor.push() } else { NSCursor.pop() }
-        }
-    }
-
     func expandTapTarget() -> some View {
         contentShape(Rectangle())
     }
@@ -178,7 +172,6 @@ struct ShortcutSettings: View {
                 .foregroundStyle(isRecording ? AppColors.brand : Color.primary)
                 .expandTapTarget()
             }
-            .cursor(.pointingHand)
         }
         // The host may close mid-recording — release the key monitor, or it
         // keeps swallowing every keyDown in the app.
@@ -281,7 +274,6 @@ struct RadioButton: View {
             .expandTapTarget()
         }
         .buttonStyle(.plain)
-        .cursor(.pointingHand)
     }
 }
 
@@ -320,7 +312,6 @@ struct AboutView: View {
                 .foregroundStyle(AppColors.brand)
                 .underline(linkHovered)
                 .onHover { linkHovered = $0 }
-                .cursor(.pointingHand)
                 .onTapGesture {
                     NSWorkspace.shared.open(URL(string: "https://www.goranimperator.com")!)
                 }

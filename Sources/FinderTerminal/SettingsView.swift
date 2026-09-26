@@ -47,7 +47,6 @@ struct SettingsView: View {
                         }
                         .font(.system(size: 12))
                     }
-                    .cursor(.pointingHand)
                     .padding(.top, 2)
                 }
 
@@ -164,20 +163,17 @@ struct SettingsView: View {
                     .expandTapTarget()
                 }
                 .buttonStyle(.plain)
-                .cursor(.pointingHand)
                 Spacer()
                 if !isActive {
                     HoverButton(action: { themeSelection = ThemeSelection.custom(t.id).storageValue }) {
                         Text("Use").font(.caption)
                     }
-                    .cursor(.pointingHand)
                 }
                 HoverButton(action: { deleteTheme(t.id) }) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
                         .foregroundStyle(.red.opacity(0.7))
                 }
-                .cursor(.pointingHand)
             }
             if isExpanded {
                 VStack(alignment: .leading, spacing: 8) {
@@ -244,7 +240,6 @@ struct SettingsView: View {
                 .expandTapTarget()
             }
             .buttonStyle(.plain)
-            .cursor(.pointingHand)
             if expanded.wrappedValue {
                 content()
             }
@@ -336,7 +331,6 @@ private struct ThemeRowButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .cursor(.pointingHand)
     }
 }
 

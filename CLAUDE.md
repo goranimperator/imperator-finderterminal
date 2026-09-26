@@ -68,6 +68,18 @@ Key constraints learned the hard way, do not undo them:
 - The panel follows from a `CADisplayLink` that pauses when idle. Drags are coalesced to one apply
   per frame.
 - `LSUIElement` apps have no menu bar, so ⌘C/⌘V/⌘X/⌘A are routed in `performKeyEquivalent`.
+- `build.sh` stamps `sdk 26.0`, not the newest installed SDK. Do not "upgrade" it. Stamped `27.0`,
+  every `NSHostingView` in the app redraws **once** from an `@AppStorage` change and then stops for
+  the rest of the process: the value is written and acted on, the owning view's body runs with the
+  new value, and its children are never asked for a body again. It hits the Settings window as much
+  as the menu bar panel; `SettingsView` only looks healthy because its `GeometryReader` preference
+  loop forces a layout pass every time. Stamped `15.0` or `26.0` the same binary tracks every click,
+  and the panel and switches render byte-identically under `26.0` and `27.0`. Ruled out one at a
+  time: the panel's window traits, the effect view, when the hosting view is built, `CloseGuard`'s
+  tap, the pre-warmed SwiftTerm session, the hotkey, the status item, the dark appearance and the
+  accent override. A standalone SwiftUI app stamped `27.0` keeps redrawing with all of those, so the
+  trigger is the stamp plus something still unnamed here. Reproduce it by building
+  `SDK_VERSION=27.0 ./build.sh` and clicking a Position radio twice.
 
 ## Debug tooling
 
