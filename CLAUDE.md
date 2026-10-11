@@ -67,7 +67,11 @@ Key constraints learned the hard way, do not undo them:
   `WindowTracker.exists` before tearing a terminal down.
 - The panel follows from a `CADisplayLink` that pauses when idle. Drags are coalesced to one apply
   per frame.
-- `LSUIElement` apps have no menu bar, so ⌘C/⌘V/⌘X/⌘A are routed in `performKeyEquivalent`.
+- `LSUIElement` apps have no menu bar, so every terminal shortcut is routed in
+  `performKeyEquivalent`: ⌘C/⌘V/⌘X/⌘A, plus ⌘K, ⌘F, ⌘G/⌘⇧G and ⌘+/⌘-/⌘0. SwiftTerm publishes find
+  only as `performTextFinderAction(_:)`, which reads the action off a menu item's `tag`, so the
+  panel builds an `NSMenuItem` to hand it one. Match on `charactersIgnoringModifiers`, never on
+  `keyCode` — on Goran's Swedish layout ⌘+ is keyCode 27 and keyCode 24 is a dead accent.
 - `build.sh` stamps `sdk 26.0`, not the newest installed SDK. Do not "upgrade" it. Stamped `27.0`,
   every `NSHostingView` in the app redraws **once** from an `@AppStorage` change and then stops for
   the rest of the process: the value is written and acted on, the owning view's body runs with the

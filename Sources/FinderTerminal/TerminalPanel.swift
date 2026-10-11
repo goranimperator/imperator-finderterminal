@@ -1,4 +1,5 @@
 import AppKit
+import SwiftTerm
 
 /// A terminal window attached to one edge of the Finder window, styled like a real
 /// macOS window: system window-background chrome (Finder's exact color), hairline
@@ -232,11 +233,31 @@ final class TerminalPanel: NSPanel {
 
     /// An accessory app has no menu bar, so nothing matches the standard editing
     /// key equivalents and Cmd-C/V never reach the terminal. Route them here.
+    ///
+    /// The same gap hides every shortcut SwiftTerm only publishes as a menu
+    /// action — clear, find, font size — so those are routed here too, to the
+    /// keys Terminal.app uses for them.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard mods == .command, let key = event.charactersIgnoringModifiers?.lowercased() else {
+        guard mods == .command || mods == [.command, .shift],
+              let key = event.charactersIgnoringModifiers?.lowercased() else {
             return super.performKeyEquivalent(with: event)
         }
+        let shift = mods.contains(.shift)
+
+        switch (key, shift) {
+        case ("k", false): if clearTerminal() { return true }
+        case ("f", false): if findAction(.showFindInterface) { return true }
+        case ("g", false): if findAction(.nextMatch) { return true }
+        case ("g", true):  if findAction(.previousMatch) { return true }
+        // Cmd-+ is Shift-= on a US layout and a bare + on a Nordic one.
+        case ("+", _), ("=", false): if stepFontSize(by: 1) { return true }
+        case ("-", false): if stepFontSize(by: -1) { return true }
+        case ("0", false): if setFontSize(0) { return true }
+        default: break
+        }
+
+        guard !shift else { return super.performKeyEquivalent(with: event) }
         let action: Selector? = switch key {
         case "c": #selector(NSText.copy(_:))
         case "v": #selector(NSText.paste(_:))
@@ -248,6 +269,52 @@ final class TerminalPanel: NSPanel {
             return super.performKeyEquivalent(with: event)
         }
         terminal.perform(action, with: self)
+        return true
+    }
+
+    /// Cmd-K: empty the screen and the scrollback with it.
+    private func clearTerminal() -> Bool {
+        guard let view = terminal as? TerminalView else { return false }
+        // Home, erase the screen, erase the scrollback (xterm's E3) — the bytes
+        // `clear` itself sends on a current terminfo, fed to the emulator rather
+        // than to the shell so a running program is not interrupted.
+        view.feed(text: "\u{1b}[H\u{1b}[2J\u{1b}[3J")
+        // The shell drew the prompt that just went away and will not repaint it
+        // until the next keystroke, which reads as a terminal that cleared
+        // itself and then died. Ctrl-L is the shell's own redraw, so zsh puts
+        // the prompt back at the top and a full-screen program repaints.
+        view.send(txt: "\u{0c}")
+        return true
+    }
+
+    /// Cmd-F / Cmd-G / Cmd-Shift-G: SwiftTerm's find bar.
+    private func findAction(_ action: NSTextFinder.Action) -> Bool {
+        guard let view = terminal as? TerminalView else { return false }
+        // SwiftTerm reads the action off the sender's menu item tag, so a menu
+        // item is what it has to be handed, menu bar or no menu bar.
+        let item = NSMenuItem()
+        item.tag = action.rawValue
+        view.performTextFinderAction(item)
+        return true
+    }
+
+    /// Cmd-+ / Cmd-- step the size, Cmd-0 goes back to the profile's own.
+    ///
+    /// Written to the setting rather than to the view: the size belongs to
+    /// `AppSettings`, the Settings slider shows it, and the fan-out applies it
+    /// to every open terminal. Setting `view.font` here would be reverted by the
+    /// next theme apply.
+    private func stepFontSize(by delta: CGFloat) -> Bool {
+        // 0 means "follow the Terminal.app profile", so step from what is drawn.
+        let current = AppSettings.fontSize > 0
+            ? AppSettings.fontSize
+            : (terminal as? TerminalView)?.font.pointSize ?? 12
+        return setFontSize(min(max(current + delta, 6), 24))
+    }
+
+    @discardableResult
+    private func setFontSize(_ size: CGFloat) -> Bool {
+        UserDefaults.standard.set(Double(size), forKey: AppSettings.fontSizeKey)
         return true
     }
 

@@ -57,7 +57,9 @@ opens one and docks to it.
 - **Resize.** Drag the pill in the gap to resize both windows at once. Drag the terminal's outer
   edge to resize only the terminal.
 - **Fullscreen.** A Finder window in native fullscreen docks the same way as a normal one.
-- **Copy and paste.** `⌘C`, `⌘V`, `⌘X`, `⌘A` work inside the terminal.
+- **Keyboard shortcuts.** The ones Terminal.app uses work inside the terminal: `⌘C`, `⌘V`, `⌘X`,
+  `⌘A`, `⌘K` to clear the screen and the scrollback, `⌘F` to find with `⌘G` / `⌘⇧G` for the next
+  and previous match, and `⌘+` / `⌘-` / `⌘0` for the font size.
 - **Minimize.** Minimizing the Finder window fades the terminal out with the Dock animation, and
   brings it back on restore.
 - **Closing.** Closing a Finder window that has a terminal attached asks first. Cancel keeps the
