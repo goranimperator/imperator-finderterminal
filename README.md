@@ -5,7 +5,7 @@
 # Imperator FinderTerminal
 
 A keyboard-triggered terminal that docks onto the frontmost **real** Finder window, the way
-[sheru.app](https://sheru.app) does `⌘J` — but without replacing Finder. Finder stays untouched, so
+[sheru.app](https://sheru.app) does `⌘J`, but without replacing Finder. Finder stays untouched, so
 every native view keeps working (icon, list, **column**, **gallery**). The app shrinks the Finder
 window, attaches a themed terminal in the freed space, and keeps the two pointed at the same folder.
 
@@ -24,29 +24,32 @@ Download the latest zip from
 `Imperator FinderTerminal.app` to `/Applications`.
 
 The app is signed with a self-signed certificate and is not notarized, so Gatekeeper blocks the
-first launch. Right-click the app and choose **Open**, or clear the quarantine flag:
+first launch with "Apple could not verify ... is free of malware", offering only **Move to Trash**
+and **Done**. Click **Done**, then clear the quarantine flag:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Imperator FinderTerminal.app"
 ```
 
+Type that line rather than copying it out of a chat window: a copied one can arrive with curly
+quotes or a non-breaking space, and then `xattr` answers "No such file".
+
 There is no Dock icon. The app lives in the menu bar.
 
 ## Permissions
 
-Three grants in **System Settings ▸ Privacy & Security**, plus notifications. The app starts
-without all of them and degrades instead of failing, but the docking only works once Accessibility
-is on.
+Three grants in **System Settings ▸ Privacy & Security**, and one in **System Settings ▸
+Notifications**. The app starts without any of them and degrades instead of failing, but the
+docking only works once Accessibility is on.
 
 | Permission | What breaks without it |
 |---|---|
 | **Accessibility** | No docking. The terminal falls back to a quake panel at the top of the screen, and the Finder window is never moved, resized or followed. |
 | **Automation ▸ Finder** | No folder sync in either direction. Prompted the first time you press the hotkey. |
 | **Input Monitoring** | No warning before a close. `⌘W` and the red close button are intercepted so the terminal can ask before it goes away; without the grant the interception never fires. |
+| **Notifications** | No notification when a newer release is out. The row in the menu bar panel still shows it. Asked the first time there is an update to report, never at first launch. |
 
-| **Notifications** | No notification when a new release is out. The in-app row still shows it. Asked for the first time there is an update to report, never at first launch, and it lives in **System Settings ▸ Notifications**, not Privacy & Security. |
-
-Accessibility and Input Monitoring have to be ticked by hand — macOS shows no prompt for them.
+Accessibility and Input Monitoring have to be ticked by hand: macOS shows no prompt for them.
 
 ## Network
 
@@ -94,7 +97,7 @@ with the app, and colors plus font size can be set by hand in Settings.
 ## Why not a real Finder extension?
 
 macOS exposes **no API to embed a view inside a Finder window**. A Finder extension (`FIFinderSync`)
-can only add a toolbar button, a right-click menu, sidebar icons and file badges — never a panel or
+can only add a toolbar button, a right-click menu, sidebar icons and file badges, never a panel or
 a terminal. So the terminal cannot live *inside* Finder. This app is the closest thing that keeps
 the real Finder: a separate window, anchored to the Finder window and moved with it.
 
@@ -155,7 +158,8 @@ otool -l "build/Imperator FinderTerminal.app/Contents/MacOS/FinderTerminal" \
 
 Building needs Xcode, not only the Command Line Tools: the vendored terminal ships a Metal shader,
 and on macOS 27 the Metal compiler is no longer installed with Xcode. Without it the build stops at
-`cannot execute tool 'metal' due to missing Metal Toolchain`. Install it once:
+`cannot execute tool 'metal' due to missing Metal Toolchain`. Install it, and expect to install it
+again after an Xcode upgrade, which has already removed it twice:
 
 ```bash
 xcodebuild -downloadComponent MetalToolchain
@@ -169,7 +173,7 @@ Build a distributable zip without touching git or the remote:
 make dist VERSION=x.y.z
 ```
 
-Cut a full release — bumps `Info.plist`, commits, tags the version, pushes, and publishes a GitHub
+Cut a full release, which bumps `Info.plist`, commits, tags the version, pushes, and publishes a GitHub
 release with the zip attached:
 
 ```bash
@@ -211,7 +215,7 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
 - **Non-zsh shells.** OSC 7 comes from the system zsh wiring, so bash and fish do not emit it and
   only the Finder-to-terminal direction syncs.
 - **Mission Control** shows the Finder window and the terminal as two tiles. macOS has no
-  cross-app window grouping, so they cannot be merged into one — but Settings can keep the terminal
+  cross-app window grouping, so they cannot be merged into one, but Settings can keep the terminal
   out of the overview entirely, which leaves the Finder window there alone. Off by default.
 - **Private API.** Fullscreen docking depends on SkyLight and may stop working on a future macOS.
   Everything else uses public API.

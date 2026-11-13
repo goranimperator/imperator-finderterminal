@@ -127,9 +127,13 @@ struct SettingsView: View {
                             }
                     }
                     HStack(spacing: 8) {
+                        // .secondary, not the .tertiary this window uses for
+                        // hints: this line carries the answer the user came for,
+                        // and tertiary measures 2.25:1 on this background, under
+                        // the 4.5:1 WCAG AA wants.
                         Text(updateStatus)
                             .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                         Spacer()
                         if let update = UpdateChecker.shared.available {
                             HoverButton(action: { UpdateChecker.open(update.page) }) {
@@ -147,7 +151,7 @@ struct SettingsView: View {
                          + "newer version shows in the menu bar panel and as one notification; "
                          + "installing it is up to you.")
                         .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: 340)
             }
