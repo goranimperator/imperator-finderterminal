@@ -55,6 +55,7 @@ One terminal per Finder window, keyed by `CGWindowID`.
 | `FinderBridge.swift` | Apple events to and from Finder |
 | `TerminalTheme.swift` | Terminal.app profile decoding and the bundled presets |
 | `MenuBarPanel.swift` | The menu bar panel itself: surface, corner, placement, dismissal |
+| `UpdateChecker.swift` | The daily GitHub release check, its panel row and its notification |
 | `PopoverView.swift`, `SettingsView.swift`, `Settings.swift` | Panel content, Settings window, About, `@AppStorage` |
 | `Vendor/SwiftTerm/` | Vendored terminal emulator with one local patch — see its README |
 
@@ -67,6 +68,14 @@ Key constraints learned the hard way, do not undo them:
   `WindowTracker.exists` before tearing a terminal down.
 - The panel follows from a `CADisplayLink` that pauses when idle. Drags are coalesced to one apply
   per frame.
+- `UpdateChecker` makes the app's **only** network request: one `GET` a day to
+  `api.github.com/repos/goranimperator/imperator-finderterminal/releases/latest`, carrying nothing
+  but the app's name and version as the User-Agent GitHub requires. Do not widen what it sends, do
+  not add a second request, and do not delete it as "network code nobody asked for": it is a
+  deliberate feature with a switch in Settings and a README section describing it. Its three
+  `UserDefaults` keys (`checkForUpdates`, `lastUpdateCheck`, `notifiedUpdateVersion`) are
+  deliberately not `ft.`-prefixed: every Imperator app uses the same three names, so one set of
+  verification commands works across all of them.
 - `LSUIElement` apps have no menu bar, so every terminal shortcut is routed in
   `performKeyEquivalent`: ⌘C/⌘V/⌘X/⌘A, plus ⌘K, ⌘F, ⌘G/⌘⇧G and ⌘+/⌘-/⌘0. SwiftTerm publishes find
   only as `performTextFinderAction(_:)`, which reads the action off a menu item's `tag`, so the

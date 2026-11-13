@@ -105,6 +105,32 @@ struct PopoverContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
 
+            // Only present when GitHub has a newer release than this build.
+            // Sits above the footer so it reads as news about the app rather
+            // than as one more thing to operate.
+            if let update = UpdateChecker.shared.available {
+                Divider()
+
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(AppColors.brand)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Version \(update.version) is out")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("You have \(UpdateChecker.currentVersion)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    HoverButton(action: { UpdateChecker.open(update.page) }) {
+                        Text("Download").font(.caption)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+
             Divider()
 
             // FOOTER -- LaunchAtLogin LEFT, actions RIGHT (9.2; About next to Quit, 10.1)

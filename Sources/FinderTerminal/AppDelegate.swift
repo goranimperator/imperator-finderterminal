@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusItem()
         setupPopover()
+        UpdateChecker.shared.start()
         promptAccessibility()
         // A crash could have left a fullscreen space insetting its window.
         SpaceReservation.clearStaleFinderReservations()

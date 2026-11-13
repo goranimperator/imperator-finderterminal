@@ -34,8 +34,9 @@ There is no Dock icon. The app lives in the menu bar.
 
 ## Permissions
 
-Three grants in **System Settings ▸ Privacy & Security**. The app starts without them and degrades
-instead of failing, but the docking only works once Accessibility is on.
+Three grants in **System Settings ▸ Privacy & Security**, plus notifications. The app starts
+without all of them and degrades instead of failing, but the docking only works once Accessibility
+is on.
 
 | Permission | What breaks without it |
 |---|---|
@@ -43,7 +44,17 @@ instead of failing, but the docking only works once Accessibility is on.
 | **Automation ▸ Finder** | No folder sync in either direction. Prompted the first time you press the hotkey. |
 | **Input Monitoring** | No warning before a close. `⌘W` and the red close button are intercepted so the terminal can ask before it goes away; without the grant the interception never fires. |
 
+| **Notifications** | No notification when a new release is out. The in-app row still shows it. Asked for the first time there is an update to report, never at first launch, and it lives in **System Settings ▸ Notifications**, not Privacy & Security. |
+
 Accessibility and Input Monitoring have to be ticked by hand — macOS shows no prompt for them.
+
+## Network
+
+One request a day, and it is the only one the app makes: a `GET` to
+`api.github.com/repos/goranimperator/imperator-finderterminal/releases/latest` to see whether a
+newer release is out. It sends nothing but the app's name and version as the User-Agent GitHub
+requires. No telemetry, no analytics, nothing about you or what you type. Turn it off in
+**Settings ▸ Updates**.
 
 ## Use
 
@@ -64,11 +75,15 @@ opens one and docks to it.
   brings it back on restore.
 - **Closing.** Closing a Finder window that has a terminal attached asks first. Cancel keeps the
   window and the folder.
+- **Updates.** Once a day the app asks GitHub whether a newer release is out. A newer version
+  shows as a row in the menu bar panel and as one notification, and both open the release page.
+  Installing is manual: the download arrives quarantined like the first one did, so run the
+  `xattr` command above again. Turn the check off in **Settings ▸ Updates**.
 
 Everything else lives behind the menu bar icon: theme, custom themes, keyboard shortcut, font size,
 dock side (top / right / bottom / left), which window keeps focus when the terminal opens, whether
-the close warning always shows or only when a process is running, and whether the terminal is hidden
-in Mission Control so only the Finder window appears there.
+the close warning always shows or only when a process is running, whether the terminal is hidden
+in Mission Control so only the Finder window appears there, and whether the app checks for updates.
 
 ## Theme
 
@@ -184,6 +199,7 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
 | `Sources/FinderTerminal/MenuBarPanel.swift` | The menu bar panel itself: surface, corner, placement, dismissal |
 | `Sources/FinderTerminal/PopoverView.swift`, `SettingsView.swift` | Menu bar panel content, Settings window, About |
 | `Sources/FinderTerminal/Settings.swift` | `UserDefaults` keys, dock sides, theme model |
+| `Sources/FinderTerminal/UpdateChecker.swift` | The daily GitHub release check and its notification |
 | `Sources/FinderTerminal/DevRemote.swift` | Headless control for verification, debug builds only |
 | `Sources/FinderTerminal/main.swift` | Entry point |
 | `Vendor/SwiftTerm/` | Vendored terminal emulator, patched (see its README) |

@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.themeKey) private var themeSelection = ThemeSelection.profile.storageValue
     @AppStorage(AppSettings.fontSizeKey) private var fontSize = 0.0
     @AppStorage(AppSettings.hideInMissionControlKey) private var hideInMissionControl = false
+    @AppStorage(UpdateChecker.enabledKey) private var checkForUpdates = true
     @State private var customThemes = AppSettings.customThemes
     @State private var themesExpanded = false
     @State private var customExpanded = false
@@ -108,6 +109,47 @@ struct SettingsView: View {
                         .labelsHidden()
                 }
                 .frame(maxWidth: 340)
+
+                Divider()
+
+                staticSection("Updates") {
+                    HStack(spacing: 6) {
+                        Text("Check for updates")
+                            .font(.system(size: 13))
+                        Spacer()
+                        Toggle("", isOn: $checkForUpdates)
+                            .toggleStyle(.switch)
+                            .scaleEffect(0.55)
+                            .tint(AppColors.brand)
+                            .labelsHidden()
+                            .onChange(of: checkForUpdates) { _, on in
+                                if on { UpdateChecker.shared.checkIfDue() }
+                            }
+                    }
+                    HStack(spacing: 8) {
+                        Text(updateStatus)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        if let update = UpdateChecker.shared.available {
+                            HoverButton(action: { UpdateChecker.open(update.page) }) {
+                                Text("Download").font(.caption)
+                            }
+                        }
+                        // Runs even with the switch off: asking is explicit.
+                        HoverButton(action: { Task { await UpdateChecker.shared.check() } }) {
+                            Text("Check Now").font(.caption)
+                        }
+                        .disabled(UpdateChecker.shared.status == .checking)
+                    }
+                    Text("Once a day the app asks GitHub for the latest release and compares it "
+                         + "with this version. Nothing is sent but the app's name and version. A "
+                         + "newer version shows in the menu bar panel and as one notification; "
+                         + "installing it is up to you.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: 340)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,6 +164,19 @@ struct SettingsView: View {
         }
         .onChange(of: customThemes) { _, newValue in
             AppSettings.customThemes = newValue
+        }
+    }
+
+    /// The Updates line: the running version when there is nothing to report,
+    /// and what was found when there is.
+    private var updateStatus: String {
+        let current = UpdateChecker.currentVersion
+        switch UpdateChecker.shared.status {
+        case .idle: return "Version \(current)"
+        case .checking: return "Checking…"
+        case .upToDate: return "Up to date, version \(current)"
+        case .failed: return "Could not reach GitHub"
+        case .available(let release): return "Version \(release.version) is available, you have \(current)"
         }
     }
 
