@@ -37,6 +37,8 @@ BIN="$ROOT/.build/$CONF/FinderTerminal"
 # the accent override. A standalone SwiftUI app stamped 27.0 keeps redrawing
 # with all of those, so the trigger is the stamp plus something still unnamed in
 # this app.
+# Retested on macOS 27.2 / SDK 27.2: still reproduces (6 of 6 writes redrawn under 26.0,
+# 1 of 6 under 27.2). Retest on each new SDK before moving the pin.
 SDK_VERSION="${SDK_VERSION:-26.0}"
 MIN_VERSION="14.0"
 
@@ -49,11 +51,6 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/FinderTerminal"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-# SwiftTerm's Metal renderer loads its shader from the SPM resource bundle, so it
-# has to travel with the app.
-for b in "$ROOT/.build/$CONF"/*_SwiftTerm.bundle; do
-    [ -d "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
-done
 
 codesign --force --sign "$IDENTITY" \
     --entitlements "$ROOT/Resources/FinderTerminal.entitlements" \

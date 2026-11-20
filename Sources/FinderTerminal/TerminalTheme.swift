@@ -13,6 +13,20 @@ struct TerminalTheme {
     var font: NSFont
     var lineHeight: CGFloat       // profile "FontHeightSpacing" multiplier, 1.0 = default
 
+    /// Everything `TerminalSession.applyTheme` writes, flattened to a string, so
+    /// two applies can be compared without touching the view. The colors keep
+    /// their alpha: a translucent profile background is part of the theme.
+    var signature: String {
+        func c(_ color: NSColor?) -> String {
+            guard let rgb = color?.usingColorSpace(.sRGB) else { return "-" }
+            return String(format: "%.4f,%.4f,%.4f,%.4f", rgb.redComponent, rgb.greenComponent,
+                          rgb.blueComponent, rgb.alphaComponent)
+        }
+        let palette = ansi.map { "\($0.red),\($0.green),\($0.blue)" }.joined(separator: ";")
+        return [c(background), c(foreground), c(cursor), c(selection), palette,
+                "\(font.fontName)@\(font.pointSize)", "\(lineHeight)"].joined(separator: "|")
+    }
+
     /// xterm basic 16-color palette, used per-slot when a profile color is missing.
     private static let fallback16: [(UInt16, UInt16, UInt16)] = [
         (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),

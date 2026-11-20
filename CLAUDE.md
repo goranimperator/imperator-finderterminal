@@ -57,10 +57,24 @@ One terminal per Finder window, keyed by `CGWindowID`.
 | `MenuBarPanel.swift` | The menu bar panel itself: surface, corner, placement, dismissal |
 | `UpdateChecker.swift` | The daily GitHub release check, its panel row and its notification |
 | `PopoverView.swift`, `SettingsView.swift`, `Settings.swift` | Panel content, Settings window, About, `@AppStorage` |
-| `Vendor/SwiftTerm/` | Vendored terminal emulator with one local patch — see its README |
 
 Key constraints learned the hard way, do not undo them:
 
+- SwiftTerm is a plain SPM dependency pinned with `exact:` in `Package.swift`, no local patches. It
+  was vendored through v1.14.0 for two patches (reverse video, auto-hiding scroller); v1.99.x fixed
+  both upstream, so the copy is gone. From v1.99 `LocalProcessTerminalViewDelegate` is `@MainActor`,
+  which makes `TerminalSession` main-actor-isolated; `AppDelegate` and `DockedTerminal` are
+  `@MainActor` to match, and `main.swift` enters through `MainActor.assumeIsolated`. Bump the pin
+  deliberately and re-check reverse video (`printf '\e[7m x \e[0m'`) and the scroller after.
+- The app target stays in Swift 5 language mode. Swift 6 mode was tried on SwiftTerm 1.99.3: four
+  errors from static mutable state (fixable with `nonisolated(unsafe)`), then a real
+  `sending 'me' risks causing data races` in the AX observer callback in `WindowTracker`, plus
+  isolation warnings in `MenuBarPanel.deinit` and the `TerminalPanel.fadeOut` completion handler.
+  Fixing them means reworking the AX and animation callbacks, and Swift 6 adds runtime isolation
+  checks to exactly those paths. Not worth it for a daily-driver app without a test suite.
+- Apple events to Finder run only on `FinderBridge`'s private serial queue, never on the main thread
+  (15-35 ms each; the close-guard event tap shares the main run loop, so a stall there delays
+  keystrokes in every app). `NSAppleScript` is created and run on that queue only.
 - Accessibility position/size writes are dropped inside a native fullscreen space. Room is made with
   `SLSSpaceSetEdgeReservation`, and the inset must be **whole points** — a fractional value collapses
   the space.
@@ -92,7 +106,9 @@ Key constraints learned the hard way, do not undo them:
   tap, the pre-warmed SwiftTerm session, the hotkey, the status item, the dark appearance and the
   accent override. A standalone SwiftUI app stamped `27.0` keeps redrawing with all of those, so the
   trigger is the stamp plus something still unnamed here. Reproduce it by building
-  `SDK_VERSION=27.0 ./build.sh` and clicking a Position radio twice.
+  `SDK_VERSION=27.0 ./build.sh` and clicking a Position radio twice. Retested on macOS 27.2 with SDK
+  27.2: still there (a harness that writes the setting six times saw every write redrawn under the
+  26.0 stamp and only the first under 27.2). Retest on each new SDK before moving the pin.
 
 ## Debug tooling
 

@@ -103,13 +103,14 @@ the real Finder: a separate window, anchored to the Finder window and moved with
 
 ## How it works
 
-- **Background menu-bar app** (`LSUIElement`, no Dock icon). No external package dependencies;
-  [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) is vendored in `Vendor/`.
+- **Background menu-bar app** (`LSUIElement`, no Dock icon). One package dependency,
+  [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm), pinned to an exact version in `Package.swift`.
 - The frontmost Finder folder is read over Apple events. Position, size and fullscreen state are
   read and written over the Accessibility API, and an `AXObserver` reports moves, resizes,
   minimize, fullscreen transitions and closes.
 - The panel follows the Finder window from a `CADisplayLink`, one apply per frame, and pauses when
-  nothing moves. It hides whenever neither Finder nor the terminal is frontmost, and the Finder
+  nothing moves. While you drag the Finder window by hand, the panel rides the mouse and starts the
+  moment the window server reports the window moved, instead of waiting for Accessibility. It hides whenever neither Finder nor the terminal is frontmost, and the Finder
   window's original size is restored when the terminal closes.
 - **Fullscreen** is the one case where Accessibility writes are dropped by the system. Room is made
   with a private SkyLight call (`SLSSpaceSetEdgeReservation`) that reserves a strip of the fullscreen
@@ -156,14 +157,9 @@ otool -l "build/Imperator FinderTerminal.app/Contents/MacOS/FinderTerminal" \
     | awk '/LC_BUILD_VERSION/,/^$/' | grep -E "minos|sdk"
 ```
 
-Building needs Xcode, not only the Command Line Tools: the vendored terminal ships a Metal shader,
-and on macOS 27 the Metal compiler is no longer installed with Xcode. Without it the build stops at
-`cannot execute tool 'metal' due to missing Metal Toolchain`. Install it, and expect to install it
-again after an Xcode upgrade, which has already removed it twice:
-
-```bash
-xcodebuild -downloadComponent MetalToolchain
-```
+Building needs Xcode, not only the Command Line Tools, and network access on the first build so
+SwiftPM can fetch SwiftTerm. SwiftTerm compiles its Metal shader at run time, so the Metal
+Toolchain download that macOS 27 made separate is not needed.
 
 ## Release
 
@@ -206,7 +202,6 @@ same `Imperator Dev` signature as local ones, so the permission grants survive a
 | `Sources/FinderTerminal/UpdateChecker.swift` | The daily GitHub release check and its notification |
 | `Sources/FinderTerminal/DevRemote.swift` | Headless control for verification, debug builds only |
 | `Sources/FinderTerminal/main.swift` | Entry point |
-| `Vendor/SwiftTerm/` | Vendored terminal emulator, patched (see its README) |
 
 ## Known limits
 
@@ -229,12 +224,10 @@ sessions per Finder window, panel size memory.
 
 ## Third-party
 
-[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza, MIT licensed, vendored in
-`Vendor/SwiftTerm` at v1.14.0 with two local patches: reverse video swaps the default colors instead
-of inverting them, and the scroll indicator fades out when nothing is scrolling. Both patches and the
-steps to move to a newer upstream release are documented in
-[`Vendor/SwiftTerm/README.md`](Vendor/SwiftTerm/README.md); the upstream license is kept at
-[`Vendor/SwiftTerm/LICENSE`](Vendor/SwiftTerm/LICENSE).
+[SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) by Miguel de Icaza, MIT licensed, used
+unmodified at v1.99.3 through Swift Package Manager. It was vendored with two local patches (reverse
+video swaps the default colors instead of inverting them, and the scroll indicator fades out when
+nothing is scrolling) until upstream shipped both fixes itself.
 
 ## License
 

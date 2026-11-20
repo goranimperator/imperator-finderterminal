@@ -1,6 +1,8 @@
 import AppKit
+import ApplicationServices
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var panel: MenuBarPanel!
@@ -28,6 +30,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.appearance = NSAppearance(named: .darkAqua)
         UserDefaults.standard.set(0, forKey: "AppleAccentColor")
         ProcessInfo.processInfo.setValue("Imperator FinderTerminal", forKey: "processName")
+
+        // Bound every Accessibility call this process makes. Against an app that
+        // has stopped responding, one AX read blocks for about 1.5 s by default
+        // and 0.14 s with a 0.1 s limit (measured against a frozen test app), and
+        // the event tap makes AX calls while every key and click on the machine
+        // waits behind it. A read that times out just reports nothing.
+        AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.15)
 
         setupStatusItem()
         setupPopover()
@@ -137,7 +146,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleTerminal() {
         guard WindowTracker.isTrusted else { toggleQuake(); return }
-
         if let id = frontmostFinderWindowID(), let t = terminals[id] {
             t.requestClose()
             return
@@ -219,7 +227,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func takeSpareSession() -> TerminalSession {
         let s = spareSession ?? TerminalSession()
         spareSession = nil
-        s.startIfNeeded(dir: FinderBridge.frontmostFolder() ?? NSHomeDirectory())
+        // No Apple event here: the folder is resolved off the main thread by
+        // `DockedTerminal`, which `cd`s into it once the answer arrives. Asking
+        // Finder from this spot cost a 30-35 ms main-thread block, and the dock
+        // asked again right after.
+        s.startIfNeeded(dir: NSHomeDirectory())
         return s
     }
 
@@ -243,7 +255,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let session = quakeSession ?? TerminalSession()
         quakeSession = session
-        session.startIfNeeded(dir: FinderBridge.frontmostFolder() ?? NSHomeDirectory())
+        let firstStart = !session.isStarted
+        session.startIfNeeded(dir: NSHomeDirectory())
+        if firstStart {
+            // The shell used to start in the front folder; now it starts at once and
+            // moves there when Finder answers, so opening never waits on Finder.
+            FinderBridge.frontmostFolder { [weak session] path in
+                if let path { session?.cd(to: path) }
+            }
+        }
         let panel = quakePanel ?? TerminalPanel(terminal: session.view)
         quakePanel = panel
         panel.applyTheme(session.applyTheme())

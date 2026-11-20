@@ -4,6 +4,7 @@ import SwiftUI
 /// One terminal docked to one Finder window: owns its shell session, panel,
 /// AX tracker and all geometry state. AppDelegate holds one of these per
 /// Finder window and fans global events (mouse, app activation) out to them.
+@MainActor
 final class DockedTerminal {
     let windowID: CGWindowID
     let session: TerminalSession
@@ -80,9 +81,14 @@ final class DockedTerminal {
         panel.setOverlay(reservedSpace != nil)
 
         panel.applyTheme(session.applyTheme())
-        let folder = FinderBridge.frontmostFolder() ?? NSHomeDirectory()
-        session.startIfNeeded(dir: folder)
-        session.cd(to: folder)
+        // The shell is already running (the spare session) or starts in $HOME;
+        // the folder follows when Finder answers. Asked off the main thread and
+        // once: this used to be a second 30-35 ms Apple event on top of the one
+        // `takeSpareSession` made, both blocking the open.
+        session.startIfNeeded(dir: NSHomeDirectory())
+        FinderBridge.frontmostFolder { [weak session] path in
+            if let path { session?.cd(to: path) }
+        }
 
         wireCallbacks()
         if let frame = tracker.currentFrame() {
@@ -131,8 +137,10 @@ final class DockedTerminal {
             if NSEvent.pressedMouseButtons & 1 == 0 { self.reassertOrder() }
         }
         tracker.onFolderChange = { [weak self] in
-            guard let self, let path = FinderBridge.frontmostFolder() else { return }
-            self.session.cd(to: path)
+            // The title changed: Finder navigated. Ask where to, off the main thread.
+            FinderBridge.frontmostFolder { [weak self] path in
+                if let path { self?.session.cd(to: path) }
+            }
         }
         tracker.onWindowClosed = { [weak self] in
             self?.windowWasClosed()
@@ -144,7 +152,7 @@ final class DockedTerminal {
         NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
         ) { [weak self] _ in
-            self?.raiseWithWindow()
+            MainActor.assumeIsolated { self?.raiseWithWindow() }
         }
         // cd in this shell steers Finder's front window (the common case: the
         // user is typing in the terminal whose window is active).
@@ -363,6 +371,7 @@ final class DockedTerminal {
 
     func redock() {
         guard docked, let f = tracker.currentFrame() else { return }
+        lastFinderFrame = f
         let rect = bodyRect(finder: f)
         guard rect != lastBodyRect else { return }
         lastBodyRect = rect
@@ -385,9 +394,16 @@ final class DockedTerminal {
     }
 
     /// Slot the panel directly above its Finder window in the global z-order.
+    ///
+    /// Uses the window id resolved once in `init`. Re-deriving it here meant two
+    /// AX reads, a pid lookup and a copy of the whole window list on every call,
+    /// about 1.4 ms against 20 microseconds for the order call itself, and this
+    /// runs three times per app switch and on every mouse-up. The id is a `let`
+    /// and stays valid across fullscreen transitions (`attach(windowID:)` re-finds
+    /// the same window by it).
     func reassertOrder() {
-        guard panel.isVisible, let num = tracker.windowNumber() else { return }
-        panel.order(.above, relativeTo: Int(num))
+        guard panel.isVisible else { return }
+        panel.order(.above, relativeTo: Int(windowID))
     }
 
     /// mouseDown snapshot (fed from the global mouseDown monitor). Prediction
@@ -439,9 +455,31 @@ final class DockedTerminal {
         return list.contains { ($0[kCGWindowNumber as String] as? CGWindowID) == id }
     }
 
+    /// Cocoa frame of the Finder window as the window server has it right now.
+    private func serverFrame() -> CGRect? {
+        guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID)
+                as? [[String: Any]],
+              let b = list.first?[kCGWindowBounds as String] as? NSDictionary,
+              let r = CGRect(dictionaryRepresentation: b) else { return nil }
+        return WindowTracker.axToCocoa(r)
+    }
+
     /// Mouse-riding drag prediction (fed from the global drag monitor).
     func predictDragPosition() {
-        guard docked, let base = dragBase else { return }
+        guard docked else { return }
+        // Don't wait for the AX geometry notification (about 100 ms behind the
+        // first movement) to start riding the mouse. The window server knows the
+        // window's real position at once; asking it about one window id costs
+        // well under a millisecond. AX is no use here: it reports the old frame
+        // until Finder's own notification fires. An inner drag (text selection,
+        // marquee) leaves the window where it is, so it still never drives the
+        // panel.
+        if dragBase == nil, !splitterDragging, let anchor = pendingDragAnchor,
+           let f = serverFrame(), f.origin != anchor.finder.origin,
+           f.size == anchor.finder.size {
+            dragBase = anchor
+        }
+        guard let base = dragBase else { return }
         let mouse = NSEvent.mouseLocation
         let predicted = base.finder.offsetBy(dx: mouse.x - base.mouse.x,
                                              dy: mouse.y - base.mouse.y)
@@ -630,9 +668,26 @@ final class DockedTerminal {
         tracker.pressCloseButton()
     }
 
+    /// Last Finder window frame we read (Cocoa space). Lets the event tap rule a
+    /// click out without asking Finder anything.
+    private var lastFinderFrame: CGRect?
+
+    /// Could `point` (AX/CGEvent space) be on a title-bar button of this window?
+    ///
+    /// The tap sees every click in every app and used to answer each with several
+    /// AX round trips into Finder, about 0.2 ms normally and a stall of a second
+    /// or more when Finder hangs, with every click on the machine waiting behind
+    /// it. A click nowhere near the top-left corner of the window is rejected
+    /// here from the frame we already hold. Unknown frame: fall through to AX.
+    private func mayBeTitleBarButton(_ point: CGPoint) -> Bool {
+        guard let f = lastFinderFrame else { return true }
+        let p = WindowTracker.axToCocoa(CGRect(origin: point, size: .zero)).origin
+        return CGRect(x: f.minX - 6, y: f.maxY - 70, width: 190, height: 76).contains(p)
+    }
+
     /// True when `point` (AX/CGEvent space) is on this window's close button.
     func ownsCloseButton(at point: CGPoint) -> Bool {
-        guard let rect = tracker.closeButtonFrame() else { return false }
+        guard mayBeTitleBarButton(point), let rect = tracker.closeButtonFrame() else { return false }
         return rect.contains(point)
     }
 
@@ -640,7 +695,9 @@ final class DockedTerminal {
     /// this window focused): fade out alongside the Dock animation instead of
     /// waiting for the AX notification, which only lands once it has finished.
     func minimizeStarting(at point: CGPoint?) -> Bool {
-        guard panel.isShown, !tracker.isMinimized else { return false }
+        guard panel.isShown else { return false }
+        if let point, !mayBeTitleBarButton(point) { return false }
+        guard !tracker.isMinimized else { return false }
         if let point {
             guard tracker.minimizeButtonFrame()?.contains(point) == true else { return false }
         }
